@@ -58,10 +58,3 @@ jobs:
                   subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
                   subject-digest: ${{ steps.push.outputs.digest }}
                   push-to-registry: true
-            - name: Make image public
-              run: |
-                  curl -X PATCH \
-                      -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-                      -H "Accept: application/vnd.github.v3+json" \
-                      https://api.github.com/user/packages/container/${{ env.IMAGE_NAME }}/versions/${{ steps.push.outputs.digest }} \
-                      -d '{"visibility": "public"}'
