@@ -9,6 +9,8 @@ dependencies = [
     "numpy (>=2.2.4,<3.0.0)",
     "pandas (>=2.2.3,<3.0.0)",
     "matplotlib (>=3.10.1,<4.0.0)",
+    "gymnasium[mujoco] (>=1.1.1,<2.0.0)",
+    "mujoco (>=3.3.0,<4.0.0)"
 ]
 
 
