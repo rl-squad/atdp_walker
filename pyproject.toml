@@ -19,6 +19,7 @@ mujoco = "^3.3.0"
 ray = "^2.44.0"
 keras = "^3.9.0"
 tensorflow-io-gcs-filesystem = "^0.31.0"
+imageio = "^2.37.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
