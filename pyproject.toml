@@ -11,8 +11,8 @@ dependencies = [
     "matplotlib (>=3.10.1,<4.0.0)",
     "gymnasium[mujoco] (>=1.1.1,<2.0.0)",
     "mujoco (>=3.3.0,<4.0.0)",
+    "stable-baselines3 (>=1.7.0,<2.0.0)",  # Add this line
 ]
-
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
