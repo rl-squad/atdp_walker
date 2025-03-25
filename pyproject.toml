@@ -1,27 +1,25 @@
-[project]
-name = "atd-walker-package"
-version = "0.0.0"
-description = "first"
-authors = [{ name = "cmc228", email = "cmc228@bath.ac.uk" }]
+[tool.poetry]
+name = "atdp"
+version = "0.2.0"
+description = "WithPPODependencies"
+authors = ["cmc228"]
+license = "MIT"
 readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-    "numpy>=1.21,<2.0",
-    "pandas>=1.3,<2.0",
-    "matplotlib>=3.4,<4.0",
-    "gymnasium[mujoco]>=1.1.1,<2.0.0",
-    "mujoco>=3.3.0,<4.0.0",
-    "stable-baselines3>=1.7.0,<2.0.0",  # PPO implementation
-    "ray[rllib]>=2.0.0,<3.0.0",          # RLlib for distributed RL
-    "tf-agents>=0.15.0,<1.0.0",          # TensorFlow-based RL library
-    "torchrl>=0.2.0,<1.0.0",             # PyTorch-based RL library
-    "pytorch-lightning>=2.0.0,<3.0.0",   # PyTorch Lightning for RL
-    "keras-rl2>=1.0.5,<2.0.0"            # Keras-based RL library
-]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11"  
+stable-baselines3 = "^2.6.0"
+tensorflow = "^2.19.0"
+torch = "^2.6.0"
+pandas = "^2.2.3"
+numpy = "^1.26.4"
+matplotlib = "^3.10.1"
+gym = "^0.26.2"
+mujoco = "^3.3.0"
+ray = "^2.44.0"
+keras = "^3.9.0"
+tensorflow-io-gcs-filesystem = "^0.31.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry]
-package-mode = false
