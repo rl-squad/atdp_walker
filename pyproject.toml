@@ -6,20 +6,17 @@ authors = [{ name = "cmc228", email = "cmc228@bath.ac.uk" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "numpy (>=2.2.4,<3.0.0)",
-    "pandas (>=2.2.3,<3.0.0)",
-    "matplotlib (>=3.10.1,<4.0.0)",
-    "gymnasium[mujoco] (>=1.1.1,<2.0.0)",
-    "mujoco (>=3.3.0,<4.0.0)",
-    "stable-baselines3 (>=1.7.0,<2.0.0)",  # PPO implementation
-    "ray[rllib] (>=2.0.0,<3.0.0)",          # RLlib for distributed RL
-    "tf-agents (>=0.13.0,<1.0.0)",          # TensorFlow-based RL library
-    "spinup (>=0.1.0,<2.0.0)",             # OpenAI Spinning Up in Deep RL
-    "torchrl (>=0.1.0,<1.0.0)",             # PyTorch-based RL library
-    "pl-bolts (>=0.6.0,<1.0.0)",            # PyTorch Lightning Bolts for RL
-    "dm-acme (>=0.9.0,<1.0.0)",             # Google DeepMind's Acme library for RL
-    "baselines (>=0.1.0,<1.0.0)",           # OpenAI Baselines for RL
-    "keras-rl2 (>=1.0.5,<2.0.0)"            # Keras-based RL library
+    "numpy>=1.21,<2.0",
+    "pandas>=1.3,<2.0",
+    "matplotlib>=3.4,<4.0",
+    "gymnasium[mujoco]>=1.1.1,<2.0.0",
+    "mujoco>=3.3.0,<4.0.0",
+    "stable-baselines3>=1.7.0,<2.0.0",  # PPO implementation
+    "ray[rllib]>=2.0.0,<3.0.0",          # RLlib for distributed RL
+    "tf-agents>=0.15.0,<1.0.0",          # TensorFlow-based RL library
+    "torchrl>=0.2.0,<1.0.0",             # PyTorch-based RL library
+    "pytorch-lightning>=2.0.0,<3.0.0",   # PyTorch Lightning for RL
+    "keras-rl2>=1.0.5,<2.0.0"            # Keras-based RL library
 ]
 
 [build-system]
