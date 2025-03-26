@@ -10,7 +10,8 @@ dependencies = [
     "pandas (>=2.2.3,<3.0.0)",
     "matplotlib (>=3.10.1,<4.0.0)",
     "gymnasium[mujoco] (>=1.1.1,<2.0.0)",
-    "mujoco (>=3.3.0,<4.0.0)"
+    "mujoco (>=3.3.0,<4.0.0)",
+    "tdqm (>=0.0.1,<0.0.2)"
 ]
 
 
