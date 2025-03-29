@@ -43,5 +43,6 @@ hare attach id
 # Copy data from ./out directory in the cloud to your local machine from wherever you run the command
 rsync -uav username@server:~/out .
 
-# Plot results for comparison on the same graph using python utils/plot_npy_files.py which grabs all .npy files from the directory which the command ran in
+# Plot results for comparison on the same graph. This grabs all .npy files from the directory which the command ran in
+python utils/plot_npy_files.py
 ```
