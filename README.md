@@ -36,13 +36,15 @@ hare attach id
 # Once training has finished #
 ##############################
 
-# There should be a .npy file in the ./out directory wherever you ran the command: hare run -v $(pwd)/out:/app/out -it username/atdp
+# There should be a .npy file in the ./out directory wherever you ran the command:
+# hare run -v $(pwd)/out:/app/out -it username/atdp
 
 # Logout from cloud with Ctrl-D
 
 # Copy data from ./out directory in the cloud to your local machine from wherever you run the command
 rsync -uav username@server:~/out .
 
-# Plot results for comparison on the same graph. This grabs all .npy files from the directory which the command ran in
+# Plot results for comparison on the same graph
+# which grabs all .npy files from the directory which the command ran in
 python utils/plot_npy_files.py
 ```
