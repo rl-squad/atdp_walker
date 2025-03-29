@@ -1,8 +1,16 @@
+import numpy as np
+import os
 from tqdm import tqdm
 import gymnasium as gym
 
 class Environment:
     def __init__(self, num_episodes, render_mode = "rgb_array"):
+        # no output dir raise value error
+        file_name = os.getenv("OUT")
+        if file_name is None:
+            raise ValueError
+        os.makedirs("./out", exist_ok=True)
+        self.file_name = file_name
         self.env = gym.make("Walker2d-v5", render_mode = render_mode)
         self.pbar = tqdm(total=num_episodes)
         self.num_episodes = num_episodes
@@ -28,7 +36,8 @@ class Environment:
             if self.episode == self.num_episodes:
 
                 # Write rewards to file
-                print(self.episode_rewards)
+                np.save(f"out/{self.file_name}.npy", self.episode_rewards)
+
                 # Cleanup
                 self.env.close()
                 self.pbar.close()
