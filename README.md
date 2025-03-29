@@ -14,8 +14,15 @@ ssh username@server
 git pull https://github.com/rl-squad/atdp_walker.git
 # Create docker image called atdp from Dockerfile
 hare build -t username/atdp ./atdp_walker
+
 # Create docker container from image, mounts volume and opens bash terminal
 hare run -v $(pwd)/out:/app/out -it username/atdp
+
+# At some point we will need GPU support for training which
+# means modifying hare run as follows: hare run --gpus device=0 ...
+# We have set up the docker image to enable GPU support
+# see https://hex.cs.bath.ac.uk/wiki/docker/Running-with-GPUs.md for more details
+
 # Starts agent training, replace filename to desired output file name and agent training script as needed
 OUT=filename poetry run python train_agent_template.py
 
