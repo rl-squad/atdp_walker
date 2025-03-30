@@ -168,8 +168,6 @@ class DDPG:
             if steps > update_after and steps % update_every == 0:
                 self.update()
 
-        print(steps)
-
 # copies params from a source to a target network
 def copy_params(target_net, source_net):
     for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
