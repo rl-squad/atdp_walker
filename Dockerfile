@@ -1,9 +1,10 @@
-# Use an official Python base image
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+# GPU supported image
+FROM nvidia/cuda:11.7.1-devel-ubuntu22.04
 
 # Set the working directory
 WORKDIR /app
 
+# Installs Python dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -14,11 +15,11 @@ RUN apt-get update && apt-get install -y \
 # Install Poetry
 RUN pip3 install --no-cache-dir poetry
 
-# Copy pyproject.toml and poetry.lock (if it exists)
+# Copy in all files from current directory
 COPY . /app/
 
 # Install dependencies without installing the current project
 RUN poetry install
 
-# Set the default command to use Poetry to run your application
+# Runs bash inside container
 CMD ["/bin/bash"]
