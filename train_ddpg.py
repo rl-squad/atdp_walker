@@ -84,8 +84,8 @@ class DDPG:
 
         # initially set parameters of the target networks 
         # to those from the actual networks
-        self.q_target.load_state_dict(self.q.state_dict())
-        self.policy_target.load_state_dict(self.policy.state_dict())
+        copy_params(self.q_target, self.q)
+        copy_params(self.policy_target, self.policy)
 
         # initialize optimizers for the q and policy networks
         self.q_optimizer = optim.Adam(self.q.parameters(), lr=1e-3)
@@ -167,7 +167,14 @@ class DDPG:
             
             if steps > update_after and steps % update_every == 0:
                 self.update()
-                
+
+        print(steps)
+
+# copies params from a source to a target network
+def copy_params(target_net, source_net):
+    for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
+        target_param.data.copy_(source_param.data)
+
 # performs an update of the target network parameters via Polyak averaging
 # where target_params = p * target_params + (1 - p) * source_params
 def polyak_update(target_net, source_net, p=0.995):
