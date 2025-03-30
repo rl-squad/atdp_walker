@@ -7,6 +7,8 @@ cd ~/Atdp_Walker
 poetry install
 ```
 
+# Cloud training workflow
+
 ```sh
 # Login to cloud
 ssh username@server
@@ -18,15 +20,19 @@ hare build -t username/atdp ./atdp_walker
 # Create docker container from image, mounts volume and opens bash terminal
 hare run -v $(pwd)/out:/app/out -it username/atdp
 
-# At some point we will need GPU support for training which
-# means modifying hare run as follows: hare run --gpus device=0 ...
-# We have set up the docker image to enable GPU support
-# see https://hex.cs.bath.ac.uk/wiki/docker/Running-with-GPUs.md for more details
+        # Alternatively, to run with GPUs:
+        # Read https://hex.cs.bath.ac.uk/wiki/docker/Running-with-GPUs.md
+        # Example command:
+        hare run --gpus device=0 -v $(pwd)/out:/app/out -it username/atdp
 
-# Starts agent training, replace filename to desired output file name and agent training script as needed
+        # Displays GPUs reserved for this running container 
+        nvidia-smi
+
+# Starts agent training, replace filename to desired output file name
+# and agent training script as needed
 OUT=filename poetry run python train_agent_template.py
 
-# Detach from running container with escape sequence Ctrl-P and Ctrl-Q
+# Detach from running container with escape sequence Ctrl-P then Ctrl-Q
 # The container will continue running until training has finished
 
 ########################################
@@ -48,7 +54,8 @@ hare attach id
 
 # Logout from cloud with Ctrl-D
 
-# Copy data from ./out directory in the cloud to your local machine from wherever you run the command
+# Copy data from ./out directory in the cloud to your local machine
+# from wherever you run the command
 rsync -uav username@server:~/out .
 
 # Plot results for comparison on the same graph
