@@ -99,8 +99,8 @@ class DDPG:
         copy_params(self.policy_target, self.policy)
 
         # initialize optimizers for the q and policy networks
-        self.q_optimizer = optim.Adam(list(self.q.parameters()), lr=1e-3)
-        self.policy_optimizer = optim.Adam(list(self.policy.parameters()), lr=1e-4)
+        self.q_optimizer = optim.Adam(self.q.parameters(), lr=1e-3)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=1e-4)
 
         # define the loss function
         self.loss = nn.MSELoss()
