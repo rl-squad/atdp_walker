@@ -194,8 +194,6 @@ class DDPG:
                 if steps % self.policy_update_after == 0:
                     self.update_policy()
 
-        print(steps)
-
 # copies params from a source to a target network
 def copy_params(target_net, source_net):
     for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
