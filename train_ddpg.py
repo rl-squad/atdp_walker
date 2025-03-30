@@ -11,7 +11,7 @@ STATE_DIM = 17
 ACTION_DIM = 6
 
 # dynamically infer device
-device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # this is the action value function over the State x Action space
 # modelled as a neural network with 3 hidden layers.
@@ -19,19 +19,17 @@ device = torch.device("cuda" if torch.cuda.is_available() else "mps")
 # to the state-action value. please note that the constructor loads
 # random initial parameter values by default
 class QNetwork(nn.Module):
-    def __init__(self, hidden_sizes=[512, 256, 128]):
+    def __init__(self, hidden_sizes=[256, 128]):
         super(QNetwork, self).__init__()
         input_dim = STATE_DIM + ACTION_DIM
         self.fc1 = nn.Linear(input_dim, hidden_sizes[0])
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
-        self.out = nn.Linear(hidden_sizes[2], 1)
+        self.out = nn.Linear(hidden_sizes[1], 1)
 
     def forward(self, state, action):
         x = torch.cat([state, action], dim=-1).to(device)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
         
         return self.out(x)
 
@@ -40,17 +38,15 @@ class QNetwork(nn.Module):
 # this function maps to a scalar vector of size 6 (representing an action)
 # where each scalar is bounded within -1 and 1 by a tanh transform
 class PolicyNetwork(nn.Module):
-    def __init__(self, hidden_sizes=[512, 256, 128]):
+    def __init__(self, hidden_sizes=[256, 128]):
         super(PolicyNetwork, self).__init__()
         self.fc1 = nn.Linear(STATE_DIM, hidden_sizes[0])
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-        self.fc3 = nn.Linear(hidden_sizes[1], hidden_sizes[2])
-        self.out = nn.Linear(hidden_sizes[2], ACTION_DIM)
+        self.out = nn.Linear(hidden_sizes[1], ACTION_DIM)
 
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
         action = torch.tanh(self.out(x))
         return action
 
@@ -79,7 +75,7 @@ class RingBuffer:
 
 
 class DDPG:
-    def __init__(self, buffer_size=1000000, batch_size=128, warmup=10000, q_update_after=1, policy_update_after=50, action_noise_params=[0, 0.2, 0.999], gamma = 0.99):
+    def __init__(self, buffer_size=1000000, batch_size=128, warmup=10000, q_update_after=1, policy_update_after=50, action_noise_params=[0, 0.8, 0.99999], gamma = 0.99):
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
@@ -193,6 +189,8 @@ class DDPG:
                 
                 if steps % self.policy_update_after == 0:
                     self.update_policy()
+        
+            self.action_noise_params[1] *= self.action_noise_params[2]
 
 # copies params from a source to a target network
 def copy_params(target_net, source_net):
@@ -205,5 +203,5 @@ def polyak_update(target_net, source_net, p=0.995):
     for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
         target_param.data.copy_(p * target_param.data + (1 - p) * source_param.data)
 
-ddpg = DDPG(warmup=10000, policy_update_after=1, q_update_after=50, action_noise_params=[0, 0.2, 1])
-ddpg.train(num_episodes=10000)
+ddpg = DDPG(warmup=10000, batch_size=256, policy_update_after=50, q_update_after=1)
+ddpg.train(num_episodes=5000)
