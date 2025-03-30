@@ -2,14 +2,17 @@ import numpy as np
 import os
 from tqdm import tqdm
 import gymnasium as gym
+import torch
 
 class Environment:
-    def __init__(self, num_episodes, render_mode = "rgb_array"):
-        # no output dir raise value error
+    def __init__(self, num_episodes, render_mode = "rgb_array", use_torch = False):
         file_name = os.getenv("OUT")
+        
+        # no output dir raise value error
         if file_name is None:
-            raise ValueError
+            raise ValueError("no output file specified. please specify a file to output results to by setting the OUT environment variable")
         os.makedirs("./out", exist_ok=True)
+
         self.file_name = file_name
         self.env = gym.make("Walker2d-v5", render_mode = render_mode)
         self.pbar = tqdm(total=num_episodes)
@@ -17,11 +20,14 @@ class Environment:
         self.episode = 0
         self.episode_rewards = []
         self.total_episode_reward = 0
+        self.use_torch = use_torch
 
     def step(self, action):
-        
         if self.done():
             raise IndexError("All episodes have terminated")
+
+        if self.use_torch:
+            action = action.detach().numpy()
 
         observation, reward, terminated, truncated, info = self.env.step(action)
 
@@ -33,8 +39,7 @@ class Environment:
             self.episode += 1
             self.pbar.update()
 
-            if self.episode == self.num_episodes:
-
+            if self.done():
                 # Write rewards to file
                 np.save(f"out/{self.file_name}.npy", self.episode_rewards)
 
@@ -42,14 +47,21 @@ class Environment:
                 self.env.close()
                 self.pbar.close()
 
+        if self.use_torch:
+            observation = torch.tensor(observation, dtype=torch.float32)
+            reward = torch.tensor(reward, dtype=torch.float32)
+            terminated = torch.tensor(terminated, dtype=torch.bool)
+            truncated = torch.tensor(truncated, dtype=torch.bool)
+
         return observation, reward, terminated, truncated, info
 
     def reset(self):
+        s, info = self.env.reset()
         
-        if self.done():
-            raise IndexError("All episodes have terminated")
-        
-        return self.env.reset()
+        if self.use_torch:
+            s = torch.tensor(s, dtype=torch.float32)
+
+        return s, info
     
     def done(self):
         return self.episode == self.num_episodes
