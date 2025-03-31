@@ -74,7 +74,7 @@ class RingBuffer:
         return random.sample(self.buffer if self.full else self.buffer[:self.index], batch_size)  
 
 class DDPG:
-    def __init__(self, buffer_size=1000000, batch_size=100, start_steps=10000, update_after=1000, update_every=50, action_noise_params=[0, 0.1], gamma = 0.99):
+    def __init__(self, buffer_size=1000000, batch_size=100, start_steps=10000, update_after=1000, update_every=50, action_noise_params=[0, 0.1], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995):
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
@@ -87,6 +87,7 @@ class DDPG:
         self.update_every = update_every
         self.action_noise_params = action_noise_params
         self.gamma = gamma
+        self.polyak = polyak
 
         # initially set parameters of the target networks 
         # to those from the actual networks
@@ -94,8 +95,8 @@ class DDPG:
         copy_params(self.policy_target, self.policy)
 
         # initialize optimizers for the q and policy networks
-        self.q_optimizer = optim.Adam(self.q.parameters(), lr=1e-3)
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=1e-4)
+        self.q_optimizer = optim.Adam(self.q.parameters(), lr=q_lr)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=policy_lr)
 
         # define the loss function
         self.loss = nn.MSELoss()
@@ -143,8 +144,8 @@ class DDPG:
         self.policy_optimizer.step()
 
         # shift target networks forward
-        polyak_update(self.q_target, self.q)
-        polyak_update(self.policy_target, self.policy)
+        polyak_update(self.q_target, self.q, self.polyak)
+        polyak_update(self.policy_target, self.policy, self.polyak)
 
 
     def train(self, num_episodes=5000):
@@ -187,7 +188,7 @@ def copy_params(target_net, source_net):
 
 # performs an update of the target network parameters via Polyak averaging
 # where target_params = p * target_params + (1 - p) * source_params
-def polyak_update(target_net, source_net, p=0.995):
+def polyak_update(target_net, source_net, p):
     for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
         target_param.data.copy_(p * target_param.data + (1 - p) * source_param.data)
 
