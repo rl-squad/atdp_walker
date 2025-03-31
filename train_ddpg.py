@@ -73,6 +73,26 @@ class RingBuffer:
     def sample(self, batch_size):
         return random.sample(self.buffer if self.full else self.buffer[:self.index], batch_size)  
 
+class OrnsteinUhlenbeckSampler:
+    def __init__(self, size=ACTION_DIM, mean=0.0, sigma=0.2, theta=0.15):
+        self.mean = mean  # The long-term mean to which the process reverts
+        self.sigma = sigma  # The magnitude of the noise
+        self.theta = theta  # The speed of mean reversion
+        
+        # Initialize the state of the process
+        self.state = torch.full((size,), mean, dtype=torch.float32).to(device)
+
+    def sample(self):
+        # Generate the noise based on the OU process formula:
+        # x(t+1) = theta * (mu - x(t)) + sigma * N(0, 1)
+        # where N(0, 1) is a standard normal random variable
+        noise = self.theta * (self.mean - self.state) + self.sigma * torch.randn_like(self.state).to(device)
+        
+        # Update the state for the next step
+        self.state = self.state + noise
+        
+        return self.state
+
 class DDPG:
     def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, action_noise_params=[0, 0.2], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995):
         self.q = QNetwork().to(device)
@@ -80,6 +100,7 @@ class DDPG:
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = RingBuffer(buffer_size)
+        self.noise_sampler = OrnsteinUhlenbeckSampler(mean=action_noise_params[0], sigma=action_noise_params[1])
         
         self.batch_size = batch_size
         self.start_steps = start_steps
@@ -106,10 +127,12 @@ class DDPG:
         with torch.no_grad():
             return self.policy(s)
 
-    # samples a policy action with random Gaussian noise
+    # samples a policy action with random Ornstein Uhlenbeck noise
     def noisy_policy_action(self, s):
         a = self.policy_action(s)  
-        noise = torch.normal(mean=self.action_noise_params[0], std=self.action_noise_params[1], size=a.shape).to(device)
+        
+        # noise = torch.normal(mean=self.action_noise_params[0], std=self.action_noise_params[1], size=a.shape).to(device)
+        noise = self.noise_sampler.sample()
 
         return torch.clamp(a + noise, min=-1, max=1)
     
