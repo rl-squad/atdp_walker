@@ -2,10 +2,9 @@ import numpy as np
 import os
 from tqdm import tqdm
 import gymnasium as gym
-import torch
 
 class Environment:
-    def __init__(self, num_episodes, render_mode = "rgb_array", use_torch = False, torch_device=None):
+    def __init__(self, num_episodes, render_mode = "rgb_array"):
         file_name = os.getenv("OUT")
         
         # no output dir raise value error
@@ -20,20 +19,10 @@ class Environment:
         self.episode = 0
         self.episode_rewards = []
         self.total_episode_reward = 0
-        self.use_torch = use_torch
-
-        if use_torch:
-            if torch_device is not None:
-                self.torch_device = torch_device
-            else:
-                self.torch_device = torch.device("cpu")
 
     def step(self, action):
         if self.done():
             raise IndexError("All episodes have terminated")
-
-        if self.use_torch:
-            action = action.detach().cpu().numpy()
 
         observation, reward, terminated, truncated, info = self.env.step(action)
 
@@ -53,19 +42,10 @@ class Environment:
                 self.env.close()
                 self.pbar.close()
 
-        if self.use_torch:
-            observation = torch.tensor(observation, dtype=torch.float32).to(self.torch_device)
-            reward = torch.tensor(reward, dtype=torch.float32).to(self.torch_device)
-            terminated = torch.tensor(terminated, dtype=torch.bool).to(self.torch_device)
-            truncated = torch.tensor(truncated, dtype=torch.bool).to(self.torch_device)
-
         return observation, reward, terminated, truncated, info
 
     def reset(self):
         s, info = self.env.reset()
-        
-        if self.use_torch:
-            s = torch.tensor(s, dtype=torch.float32).to(self.torch_device)
 
         return s, info
     
