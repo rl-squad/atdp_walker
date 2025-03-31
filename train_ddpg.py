@@ -71,7 +71,10 @@ class RingBuffer:
 
     # generate a random sample of batch_size from the buffer
     def sample(self, batch_size):
-        return random.sample(self.buffer if self.full else self.buffer[:self.index], batch_size)  
+        return random.sample(
+            self.buffer if self.full else self.buffer[:self.index],
+            min(len(self.buffer) if self.full else self.index, batch_size)
+        )
 
 class OrnsteinUhlenbeckSampler:
     def __init__(self, size=ACTION_DIM, mean=0.0, sigma=0.2, theta=0.15):
