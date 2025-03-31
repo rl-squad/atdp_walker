@@ -74,7 +74,7 @@ class RingBuffer:
         return random.sample(self.buffer if self.full else self.buffer[:self.index], batch_size)  
 
 class DDPG:
-    def __init__(self, buffer_size=1000000, batch_size=100, start_steps=10000, update_after=1000, update_every=50, action_noise_params=[0, 0.1], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995):
+    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, action_noise_params=[0, 0.2], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995):
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
@@ -176,10 +176,10 @@ class DDPG:
                     self.update()
 
     def save_policy(self, path):
-        torch.save(self.policy.state_dict, path)
+        torch.save(self.policy.state_dict(), path)
     
     def load_policy(self, path):
-        self.policy.load_state_dict(torch.load(path))
+        self.policy.load_state_dict(torch.load(path, map_location=device))
 
 # copies params from a source to a target network
 def copy_params(target_net, source_net):
@@ -195,3 +195,4 @@ def polyak_update(target_net, source_net, p):
 ddpg = DDPG()
 ddpg.train(num_episodes=5000)
 ddpg.save_policy("./out/ddpg_policy.pth")
+ddpg.load_policy("./out/ddpg_policy.pth")
