@@ -46,9 +46,7 @@ class Environment:
         return observation, reward, terminated, truncated, info
 
     def reset(self):
-        s, info = self.env.reset()
-
-        return s, info
+        return self.env.reset()
     
     def done(self):
         return self.episode == self.num_episodes
