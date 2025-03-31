@@ -150,7 +150,8 @@ class DDPG:
         s_n = torch.cat([sample[3].unsqueeze(0) for sample in samples], dim=0).to(device)
         d = torch.tensor([sample[4] for sample in samples], dtype=torch.float32).unsqueeze(1).to(device)
 
-        target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))
+        with torch.no_grad():
+            target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))
 
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
