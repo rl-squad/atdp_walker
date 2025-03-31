@@ -5,7 +5,7 @@ import os
 
 def plot_1d_arrays():
     # Find all .npy files in current directory
-    npy_files = glob.glob('.*.npy')
+    npy_files = glob.glob('*.npy')
     
     if not npy_files:
         print("No .npy files found in current directory")
