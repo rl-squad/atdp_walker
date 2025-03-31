@@ -1,4 +1,3 @@
-# import math
 import random
 import torch
 import torch.nn as nn
@@ -6,7 +5,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 # local imports
-from environment import Environment
+from environment import TorchEnvironment
 
 # declaring the state and action dimensions as constants
 STATE_DIM = 17
@@ -149,7 +148,7 @@ class DDPG:
 
 
     def train(self, num_episodes=5000):
-        env = Environment(num_episodes=num_episodes, use_torch=True, torch_device=device)
+        env = TorchEnvironment(num_episodes=num_episodes, device=device)
         
         steps = 0
         s, _ = env.reset()
@@ -174,17 +173,12 @@ class DDPG:
             if steps > self.update_after and steps % self.update_every == 0:
                 for _ in range(self.update_every):
                     self.update()
+
+    def save_policy(self, path):
+        torch.save(self.policy.state_dict, path)
     
-    def demo(self):
-        env = Environment(num_episodes=5000, use_torch=True, torch_device=device, render_mode="human")
-
-        s, _ = env.reset()
-
-        while not env.done():
-            s, _, terminated, truncated, _ = env.step(self.policy_action(s))
-
-            if terminated or truncated:
-                s, _ = env.reset()
+    def load_policy(self, path):
+        self.policy.load_state_dict(torch.load(path))
 
 # copies params from a source to a target network
 def copy_params(target_net, source_net):
@@ -199,4 +193,4 @@ def polyak_update(target_net, source_net, p=0.995):
 
 ddpg = DDPG()
 ddpg.train(num_episodes=5000)
-ddpg.demo()
+ddpg.save_policy("./out/ddpg_policy.pth")
