@@ -21,6 +21,10 @@ To start training using Stable-Baselines3 PPO, run:
 poetry run python main.py train --lib stable --job-id run001 --job-description "First SB3 PPO run"
 ```
 
+### train with CleanRLTrainer
+ poetry run python main.py train --lib cleanrl --job-id test_cleanrl_01 --job-description "REINFORCE baseline with simple MLP"
+ 
+
 After training, you'll find your results in:
 - `results/results_stable/training_log.csv` (episode rewards and losses)
 - `results/results_stable/walker2d_ppo.zip` (saved model)
