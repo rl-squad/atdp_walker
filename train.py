@@ -99,3 +99,87 @@ class StableTrainer(TrainerBase):
         model.save(model_path)
         print(f"Model saved to {model_path}")
         env.close()
+
+
+
+#CleanRLTrainer skeleton
+class CleanRLTrainer(TrainerBase):
+    def get_name(self):
+        """
+        Return trainer name for directory naming.
+        """
+        return "cleanrl"
+
+    def train(self, total_timesteps=10000):
+        """
+        Placeholder for CleanRL-style PPO training logic.
+        To be implemented with a minimal PyTorch policy and loop.
+        """
+        print(f"[CleanRL] Not implemented yet for job: {self.job_id}")
+
+
+
+#RLibTrainerSkeleton
+class RLlibTrainer(TrainerBase):
+    def get_name(self):
+        """
+        Return trainer name for directory naming.
+        """
+        return "rllib"
+
+    def train(self, total_timesteps=10000):
+        """
+        Placeholder for RLlib PPO trainer.
+        Requires ray[rllib] and policy config.
+        """
+        print(f"[RLlib] Not implemented yet for job: {self.job_id}")
+
+
+
+#GarageTrainerSkeleton
+class GarageTrainer(TrainerBase):
+    def get_name(self):
+        """
+        Return trainer name for directory naming.
+        """
+        return "garage"
+
+    def train(self):
+        """
+        Placeholder for Garage PPO trainer.
+        Garage requires TensorFlow and special setup.
+        """
+        print(f"[Garage] Not implemented yet for job: {self.job_id}")
+
+
+#JustPytorchSkeleton
+class CustomTrainer(TrainerBase):
+    def get_name(self):
+        """
+        Return trainer name for directory naming.
+        """
+        return "custom"
+
+    def train(self, total_timesteps=10000):
+        """
+        Placeholder for custom PPO implementation from scratch.
+        This will use only PyTorch without any external RL library.
+        """
+        print(f"[Custom PPO] Not implemented yet for job: {self.job_id}")
+
+
+
+#HuggingFaceSkeleton
+class HuggingFaceTrainer(TrainerBase):
+    def get_name(self):
+        """
+        Return trainer name for directory naming.
+        """
+        return "hf_sb3"
+
+    def train(self, total_episodes=1000):
+        """
+        Train with SB3 and upload to Hugging Face Hub.
+        Requires huggingface_sb3 package and login token.
+        """
+        print(f"[HuggingFace SB3] Not implemented yet for job: {self.job_id}")
