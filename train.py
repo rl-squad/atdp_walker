@@ -3,6 +3,8 @@ import csv
 import numpy as np
 import gymnasium as gym
 from stable_baselines3 import PPO
+from huggingface_sb3 import package_to_hub
+
 
 
 # Base trainer class to handle shared setup and logging
@@ -168,18 +170,3 @@ class CustomTrainer(TrainerBase):
         print(f"[Custom PPO] Not implemented yet for job: {self.job_id}")
 
 
-
-#HuggingFaceSkeleton
-class HuggingFaceTrainer(TrainerBase):
-    def get_name(self):
-        """
-        Return trainer name for directory naming.
-        """
-        return "hf_sb3"
-
-    def train(self, total_episodes=1000):
-        """
-        Train with SB3 and upload to Hugging Face Hub.
-        Requires huggingface_sb3 package and login token.
-        """
-        print(f"[HuggingFace SB3] Not implemented yet for job: {self.job_id}")

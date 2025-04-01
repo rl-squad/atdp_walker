@@ -1,5 +1,5 @@
 import argparse
-from train import StableTrainer, CleanRLTrainer, RLlibTrainer, GarageTrainer, CustomTrainer, HuggingFaceTrainer
+from train import StableTrainer, CleanRLTrainer, RLlibTrainer, GarageTrainer, CustomTrainer
 
 
 
@@ -25,7 +25,6 @@ def main():
         "rllib": RLlibTrainer,
         "garage": GarageTrainer,
         "custom": CustomTrainer,
-        "hf_sb3": HuggingFaceTrainer,
     }
 
     # Instantiate and run the selected trainer
