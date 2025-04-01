@@ -3,8 +3,38 @@ import csv
 import numpy as np
 import gymnasium as gym
 from stable_baselines3 import PPO
-from huggingface_sb3 import package_to_hub
 
+#for cleaRL
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.distributions.normal import Normal
+
+
+class Policy(nn.Module):
+    def __init__(self, obs_dim, act_dim):
+        # I’m building a custom neural network that inherits all the powerful tools from nn.Module
+        # This gives access to utilities like model.to(), model.parameters(), saving/loading, etc.
+        super().__init__()
+        
+        # Define a small MLP (Multi-Layer Perceptron) with two hidden layers of 64 units
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, 64),  # First hidden layer
+            nn.Tanh(),               # Tanh activation keeps values between -1 and 1
+            nn.Linear(64, 64),       # Second hidden layer
+            nn.Tanh()                # Another Tanh activation
+        )
+
+        # Output layer for the mean of the Gaussian action distribution
+        self.mean = nn.Linear(64, act_dim)
+
+        # Learnable parameter for log standard deviation (for exploration)
+        self.log_std = nn.Parameter(torch.zeros(act_dim))
+
+    def forward(self, x):
+        # Forward pass: transforms the input x into mean and std of the action distribution
+        x = self.net(x)
+        return self.mean(x), self.log_std.exp()
 
 
 # Base trainer class to handle shared setup and logging
