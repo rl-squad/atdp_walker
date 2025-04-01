@@ -29,18 +29,23 @@ def save_model(model, model_name="walker2d_ppo"):
     model.save(model_name)
 
 def train_stable(job_id: str, job_description: str, total_episodes=1000, max_steps_per_episode=1000):
-    """Main function to train the model and log the progress."""
-    print(f"Getting on with job: {job_id}")
-    print(f"Job description: {job_description}")
+    """Train PPO using Stable-Baselines3 and save logs/models."""
+    print(f"[Stable-Baselines3] Starting job: {job_id}")
+    print(f"Description: {job_description}")
+
+    # Define result directory
+    result_dir = os.path.join("results", "results_stable")
+    os.makedirs(result_dir, exist_ok=True)
 
     # Create environment and model
-    env = create_environment()
-    model = initialize_model(env)
+    env = gym.make("Walker2d-v5")
+    model = PPO("MlpPolicy", env, verbose=1)
 
-    # File to save training data
-    log_file = "./local_folder/training_log.csv"
+    # Define log and model file paths
+    log_file = os.path.join(result_dir, "training_log.csv")
+    model_path = os.path.join(result_dir, "walker2d_ppo.zip")
 
-    # Train the model
+    # Training loop
     for episode in range(total_episodes):
         obs, _ = env.reset()
         total_reward = 0
@@ -55,11 +60,13 @@ def train_stable(job_id: str, job_description: str, total_episodes=1000, max_ste
             if done or truncated:
                 break
 
-        # Calculate and save episode data
         avg_loss = np.mean(losses)
-        save_training_log(log_file, episode, total_reward, avg_loss)
+        with open(log_file, mode='a', newline='') as file:
+            writer = csv.writer(file)
+            if file.tell() == 0:
+                writer.writerow(["Episode", "Reward", "Loss"])
+            writer.writerow([episode + 1, total_reward, avg_loss])
 
-    # Save the trained model
-    save_model(model)
-
+    model.save(model_path)
+    print(f"Model saved to {model_path}")
     env.close()
