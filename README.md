@@ -32,7 +32,7 @@ You can switch libraries using the `--lib` option. Trainers currently available 
 - `rllib`: Ray RLlib
 - `garage`: RL Garage
 - `custom`: PPO from scratch
-- `hf_sb3`: Stable-Baselines3 + Hugging Face Hub upload
+
 
 ### Project Structure
 ```
