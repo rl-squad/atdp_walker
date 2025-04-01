@@ -135,6 +135,7 @@ class StableTrainer(TrainerBase):
 
 
 #CleanRLTrainer skeleton
+# CleanRL-style trainer using PyTorch and a REINFORCE-like training loop
 class CleanRLTrainer(TrainerBase):
     def get_name(self):
         """
@@ -144,11 +145,69 @@ class CleanRLTrainer(TrainerBase):
 
     def train(self, total_timesteps=10000):
         """
-        Placeholder for CleanRL-style PPO training logic.
-        To be implemented with a minimal PyTorch policy and loop.
+        Train a policy using a basic REINFORCE algorithm.
         """
-        print(f"[CleanRL] Not implemented yet for job: {self.job_id}")
+        # Create the environment and determine input/output dimensions
+        env = self.create_environment()
+        obs_dim = env.observation_space.shape[0]
+        act_dim = env.action_space.shape[0]
 
+        # Initialize policy and optimizer
+        model = Policy(obs_dim, act_dim)
+        optimizer = optim.Adam(model.parameters(), lr=3e-4)
+
+        # Prepare result paths
+        obs, _ = env.reset()
+        episode_reward = 0
+        rewards = []
+        log_file = os.path.join(self.result_dir, "training_log.csv")
+        model_path = os.path.join(self.result_dir, "walker2d_cleanrl.pt")
+
+        # Main training loop
+        for step in range(total_timesteps):
+            # Convert observation to tensor
+            obs_tensor = torch.tensor(obs, dtype=torch.float32)
+
+            # Get action distribution from policy
+            mean, std = model(obs_tensor)
+            dist = Normal(mean, std)
+            action = dist.sample()
+            log_prob = dist.log_prob(action).sum()
+
+            # Placeholder value estimate (no critic used here)
+            value_estimate = torch.tensor([0.0])
+
+            # Step in the environment
+            next_obs, reward, done, truncated, _ = env.step(action.detach().numpy())
+
+            # Compute REINFORCE loss using advantage = reward - baseline
+            advantage = reward - value_estimate.item()
+            loss = -log_prob * advantage
+
+            # Backprop and update policy
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # Track reward and prepare next step
+            obs = next_obs
+            episode_reward += reward
+
+            if done or truncated:
+                rewards.append(episode_reward)
+                obs, _ = env.reset()
+                episode_reward = 0
+
+        # Save training log using inherited method
+        for i, r in enumerate(rewards):
+            self.save_training_log(log_file, i, r)
+
+        # Save model
+        torch.save(model.state_dict(), model_path)
+        print(f"[CleanRL] Model saved to {model_path}")
+
+        # Clean up environment
+        env.close()
 
 
 #RLibTrainerSkeleton
