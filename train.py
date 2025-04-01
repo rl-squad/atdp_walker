@@ -1,94 +1,101 @@
 import os
 import csv
-import gymnasium as gym
 import numpy as np
+import gymnasium as gym
 from stable_baselines3 import PPO
 
-def create_environment():
-    """Create and return the Walker2D environment."""
-    return gym.make("Walker2d-v5")
 
-def initialize_model(env):
-    """Initialize and return the PPO model."""
-    return PPO("MlpPolicy", env, verbose=1)
+# Base trainer class to handle shared setup and logging
+class TrainerBase:
+    def __init__(self, job_id: str, job_description: str):
+        """
+        Initialize trainer with job metadata and result folder.
+        """
+        self.job_id = job_id
+        self.job_description = job_description
+        self.result_dir = os.path.join("results", f"results_{self.get_name()}")
+        os.makedirs(self.result_dir, exist_ok=True)
 
-def save_training_log(log_file, episode, total_reward, avg_loss):
-    """Save the training results in a CSV file."""
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        print(f"[{self.get_name().capitalize()}] Starting job: {job_id}")
+        print(f"Description: {job_description}")
 
-    # Write data to the CSV file
-    with open(log_file, mode='a', newline='') as file:
-        writer = csv.writer(file)
-        if file.tell() == 0:  # If the file is empty, write headers
-            writer.writerow(["Episode", "Reward", "Loss"])
-        writer.writerow([episode + 1, total_reward, avg_loss])
+    def get_name(self):
+        """
+        Return the name identifier for the trainer.
+        Used to name result directories.
+        """
+        return "base"
 
-def save_model(model, model_name="walker2d_ppo"):
-    """Save the trained model."""
-    model.save(model_name)
+    def train(self):
+        """
+        Default placeholder for the training loop.
+        Should be overridden by subclasses.
+        """
+        print("[BaseTrainer] No training logic implemented.")
 
-def train_stable(job_id: str, job_description: str, total_episodes=1000, max_steps_per_episode=1000):
-    """Train PPO using Stable-Baselines3 and save logs/models."""
-    print(f"[Stable-Baselines3] Starting job: {job_id}")
-    print(f"Description: {job_description}")
+    def create_environment(self):
+        """
+        Create and return the Walker2D environment.
+        """
+        return gym.make("Walker2d-v5")
 
-    # Define result directory
-    result_dir = os.path.join("results", "results_stable")
-    os.makedirs(result_dir, exist_ok=True)
+    def save_training_log(self, log_file, episode, total_reward, avg_loss=None):
+        """
+        Save a single training episode result to CSV.
+        Includes average loss if provided.
+        """
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
-    # Create environment and model
-    env = gym.make("Walker2d-v5")
-    model = PPO("MlpPolicy", env, verbose=1)
-
-    # Define log and model file paths
-    log_file = os.path.join(result_dir, "training_log.csv")
-    model_path = os.path.join(result_dir, "walker2d_ppo.zip")
-
-    # Training loop
-    for episode in range(total_episodes):
-        obs, _ = env.reset()
-        total_reward = 0
-        losses = []
-
-        for _ in range(max_steps_per_episode):
-            action, _ = model.predict(obs)
-            obs, reward, done, truncated, _ = env.step(action)
-            total_reward += reward
-            losses.append(np.random.uniform(0.01, 0.05))  # Simulated loss
-
-            if done or truncated:
-                break
-
-        avg_loss = np.mean(losses)
         with open(log_file, mode='a', newline='') as file:
             writer = csv.writer(file)
             if file.tell() == 0:
-                writer.writerow(["Episode", "Reward", "Loss"])
-            writer.writerow([episode + 1, total_reward, avg_loss])
+                headers = ["Episode", "Reward"]
+                if avg_loss is not None:
+                    headers.append("Loss")
+                writer.writerow(headers)
 
-    model.save(model_path)
-    print(f"Model saved to {model_path}")
-    env.close()
+            row = [episode + 1, total_reward]
+            if avg_loss is not None:
+                row.append(avg_loss)
+            writer.writerow(row)
 
 
+# Stable-Baselines3 implementation using PPO
+class StableTrainer(TrainerBase):
+    def get_name(self):
+        """
+        Return trainer name for directory naming.
+        """
+        return "stable"
 
-def train_cleanrl(job_id: str, job_description: str):
-    """Train using CleanRL-style PPO."""
-    ...
+    def train(self, total_episodes=1000, max_steps_per_episode=1000):
+        """
+        Train PPO agent using Stable-Baselines3.
+        Logs rewards and a simulated loss per episode.
+        """
+        env = self.create_environment()
+        model = PPO("MlpPolicy", env, verbose=1)
 
-def train_custom(job_id: str, job_description: str):
-    """Train using a custom PPO implementation from scratch (PyTorch)."""
-    print(f"[Custom PPO] Placeholder for custom PPO implementation: {job_id}")
+        log_file = os.path.join(self.result_dir, "training_log.csv")
+        model_path = os.path.join(self.result_dir, "walker2d_ppo.zip")
 
-def train_rllib(job_id: str, job_description: str):
-    """Train using RLlib (Ray) PPO."""
-    print(f"[RLlib] Placeholder for RLlib PPO: {job_id}")
+        for episode in range(total_episodes):
+            obs, _ = env.reset()
+            total_reward = 0
+            losses = []
 
-def train_garage(job_id: str, job_description: str):
-    """Train using Garage library PPO."""
-    print(f"[Garage] Placeholder for Garage PPO: {job_id}")
+            for _ in range(max_steps_per_episode):
+                action, _ = model.predict(obs)
+                obs, reward, done, truncated, _ = env.step(action)
+                total_reward += reward
+                losses.append(np.random.uniform(0.01, 0.05))  # Simulated loss
 
-def train_sb3_huggingface(job_id: str, job_description: str):
-    """Train using SB3 and upload model to Hugging Face Hub."""
-    print(f"[HuggingFace SB3] Placeholder for Hugging Face SB3 integration: {job_id}")
+                if done or truncated:
+                    break
+
+            avg_loss = np.mean(losses)
+            self.save_training_log(log_file, episode, total_reward, avg_loss)
+
+        model.save(model_path)
+        print(f"Model saved to {model_path}")
+        env.close()
