@@ -28,7 +28,7 @@ def save_model(model, model_name="walker2d_ppo"):
     """Save the trained model."""
     model.save(model_name)
 
-def train(job_id: str, job_description: str, total_episodes=1000, max_steps_per_episode=1000):
+def train_stable(job_id: str, job_description: str, total_episodes=1000, max_steps_per_episode=1000):
     """Main function to train the model and log the progress."""
     print(f"Getting on with job: {job_id}")
     print(f"Job description: {job_description}")
