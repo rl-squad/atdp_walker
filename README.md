@@ -62,3 +62,6 @@ rsync -uav username@server:~/out .
 # which grabs all .npy files from the directory which the command ran in
 python utils/plot_npy_files.py
 ```
+
+
+#control p control q for the container continue running
