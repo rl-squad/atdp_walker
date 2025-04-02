@@ -1,26 +1,25 @@
+import os
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
-import glob
-import os
 
-def plot_1d_arrays():
-    # Find all .npy files in current directory
-    npy_files = glob.glob('*.npy')
-    
-    if not npy_files:
-        print("No .npy files found in current directory")
+def plot_performance():
+    files = glob.glob('./out/*_bench.npy')
+
+    if not files:
+        print("No bench files found in ./out directory")
         return
     
-    # Load only 1D arrays
     arrays = []
     filenames = []
-    for file in npy_files:
+    for file in files:
         try:
             data = np.load(file)
-            if data.ndim == 1:  # Only keep 1D arrays
+            if data.ndim == 2:  # Only keep 2D arrays
                 arrays.append(data)
                 filenames.append(os.path.basename(file))
             else:
+                print(data.ndim)
                 print(f"Skipping {file} - not 1D (shape: {data.shape})")
         except Exception as e:
             print(f"Error loading {file}: {e}")
@@ -30,16 +29,25 @@ def plot_1d_arrays():
         return
     
     # Create single figure
-    plt.figure(figsize=(20, 12))
+    plt.figure(figsize=(10, 6))
     
     # Plot all 1D arrays on same graph
     for arr, filename in zip(arrays, filenames):
-        plt.plot(arr, label=filename)
+        timestep = np.array((i + 1) * 10 for i, _ in enumerate(arr))
+        mean = np.array([obs[0] for obs in arr])
+        sd = np.array([obs[1] for obs in arr])
+
+        upper = mean + sd
+        lower = mean - sd
+
+        plt.plot(mean, label=filename)
+        # plt.plot(upper, label="upper")
+        # plt.plot(lower, label="lower")
     
     # Add plot decorations
-    plt.title("1D Arrays Comparison")
-    plt.xlabel("Index")
-    plt.ylabel("Value")
+    plt.title("Performance")
+    plt.xlabel("Timestep * 1e-4")
+    plt.ylabel("Mean Episode Reward")
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # Legend outside plot
     plt.grid(True, alpha=0.3)
     
@@ -48,4 +56,4 @@ def plot_1d_arrays():
     plt.show()
 
 if __name__ == "__main__":
-    plot_1d_arrays()
+    plot_performance()
