@@ -100,7 +100,7 @@ class TorchEnvironment(Environment):
     
     def _policy_snapshot(self):
         # create a new policy network and clone the current policy
-        policy = PolicyNetwork()
+        policy = PolicyNetwork().to(self.device)
         copy_params(policy, self.policy)
 
         return policy

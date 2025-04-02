@@ -33,6 +33,7 @@ def plot_performance():
     
     # Plot all 1D arrays on same graph
     for arr, filename in zip(arrays, filenames):
+        timestep = np.array((i + 1) * 10 for i, _ in enumerate(arr))
         mean = np.array([obs[0] for obs in arr])
         sd = np.array([obs[1] for obs in arr])
 

@@ -5,7 +5,7 @@ import os
 
 def plot_1d_arrays():
     # Find all .npy files in current directory
-    npy_files = glob.glob('./out/archive/*.npy')
+    npy_files = glob.glob('./out/*.npy')
     
     if not npy_files:
         print("No .npy files found in current directory")
@@ -30,7 +30,7 @@ def plot_1d_arrays():
         return
     
     # Create single figure
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(20, 12))
     
     # Plot all 1D arrays on same graph
     for arr, filename in zip(arrays, filenames):

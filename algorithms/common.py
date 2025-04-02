@@ -1,4 +1,3 @@
-import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,23 +52,43 @@ class PolicyNetwork(nn.Module):
 # of a specified size from the buffer. this is used to bootstrap samples
 # for the Q and Policy network updates
 class ReplayBuffer:
-    def __init__(self, size):
+    def __init__(self, size, state_dim=STATE_DIM, action_dim=ACTION_DIM, device=DEFAULT_DEVICE):
         self.size = size
-        self.buffer = [None] * size
         self.index = 0
         self.full = False
+        self.device = device
 
-    def append(self, item):
-        self.buffer[self.index] = item
+        # Pre-allocate tensors on the specified device
+        self.states = torch.zeros((size, state_dim), device=device)
+        self.actions = torch.zeros((size, action_dim), device=device)
+        self.rewards = torch.zeros((size, 1), device=device)
+        self.next_states = torch.zeros((size, state_dim), device=device)
+        self.dones = torch.zeros((size, 1), device=device)
+
+    def append(self, state, action, reward, next_state, done):
+        """Store a transition in pre-allocated tensor memory"""
+        self.states[self.index] = state
+        self.actions[self.index] = action
+        self.rewards[self.index] = reward
+        self.next_states[self.index] = next_state
+        self.dones[self.index] = done
+
+        # Update circular buffer index
         self.index = (self.index + 1) % self.size
         if self.index == 0:
             self.full = True
 
-    # generate a random sample of batch_size from the buffer
     def sample(self, batch_size):
-        return random.sample(
-            self.buffer if self.full else self.buffer[:self.index],
-            min(self.size if self.full else self.index, batch_size)
+        """Efficiently sample tensors from pre-allocated memory"""
+        max_size = self.size if self.full else self.index
+        indices = torch.randint(0, max_size, (batch_size,), device=self.device)
+
+        return (
+            self.states[indices],
+            self.actions[indices],
+            self.rewards[indices],
+            self.next_states[indices],
+            self.dones[indices],
         )
 
 class OrnsteinUhlenbeckSampler:
@@ -86,7 +105,7 @@ class OrnsteinUhlenbeckSampler:
         # Generate the noise based on the OU process formula:
         # x(t+1) = theta * (mu - x(t)) + sigma * N(0, 1)
         # where N(0, 1) is a standard normal random variable
-        noise = self.theta * (self.mean - self.state) + self.sigma * torch.randn_like(self.state).to(self.device)
+        noise = self.theta * (self.mean - self.state) + self.sigma * torch.randn_like(self.state)
         
         # Update the state for the next step
         self.state = self.state + noise

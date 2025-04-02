@@ -22,7 +22,7 @@ class DDPG:
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = ReplayBuffer(buffer_size)
+        self.buffer = ReplayBuffer(buffer_size, device=device)
         self.noise_sampler = OrnsteinUhlenbeckSampler(mean=action_noise_params[0], sigma=action_noise_params[1], device=device)
         
         self.batch_size = batch_size
@@ -62,13 +62,7 @@ class DDPG:
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        samples = self.buffer.sample(self.batch_size)
-        
-        s = torch.cat([sample[0].unsqueeze(0) for sample in samples], dim=0).to(self.device)
-        a = torch.cat([sample[1].unsqueeze(0) for sample in samples], dim=0).to(self.device)
-        r = torch.tensor([sample[2] for sample in samples], dtype=torch.float32).unsqueeze(1).to(self.device)
-        s_n = torch.cat([sample[3].unsqueeze(0) for sample in samples], dim=0).to(self.device)
-        d = torch.tensor([sample[4] for sample in samples], dtype=torch.float32).unsqueeze(1).to(self.device)
+        s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
             target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))
@@ -95,8 +89,8 @@ class DDPG:
         polyak_update(self.policy_target, self.policy, self.polyak)
 
 
-    def train(self, num_episodes=5000):
-        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=True, device=self.device)
+    def train(self, num_episodes=5000, benchmark=False):
+        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
         
         steps = 0
         s, _ = env.reset()
@@ -110,7 +104,7 @@ class DDPG:
             s_n, r, terminated, truncated, _ = env.step(a)
             d = terminated or truncated
             
-            self.buffer.append((s, a, r, s_n, d.to(torch.float32)))
+            self.buffer.append(s, a, r, s_n, d.to(torch.float32))
             s = s_n
             
             if d:

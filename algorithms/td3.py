@@ -24,7 +24,7 @@ class TD3:
         self.q2_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = ReplayBuffer(buffer_size)
+        self.buffer = ReplayBuffer(buffer_size, device=device)
         self.noise_sampler = OrnsteinUhlenbeckSampler(mean=action_noise_params[0], sigma=action_noise_params[1], device=device)
 
         self.batch_size = batch_size
@@ -59,20 +59,14 @@ class TD3:
         return torch.clamp(a + noise, min=-1, max=1)
     
     def update(self, skip_policy_update):
-        samples = self.buffer.sample(self.batch_size)
-
-        s = torch.cat([sample[0].unsqueeze(0) for sample in samples], dim=0).to(self.device)
-        a = torch.cat([sample[1].unsqueeze(0) for sample in samples], dim=0).to(self.device)
-        r = torch.tensor([sample[2] for sample in samples], dtype=torch.float32).unsqueeze(1).to(self.device)
-        s_n = torch.cat([sample[3].unsqueeze(0) for sample in samples], dim=0).to(self.device)
-        d = torch.tensor([sample[4] for sample in samples], dtype=torch.float32).unsqueeze(1).to(self.device)
+        s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
             a_target = self.policy_target(s_n)
-            clipped_noise = torch.clamp(torch.normal(mean=self.target_noise_params[0], std=self.target_noise_params[1], size=a_target.shape).to(self.device), min=-self.target_noise_params[2], max=self.target_noise_params[2])
-            a_target_noisy = torch.clamp(a_target + clipped_noise, min=-1, max=1).to(self.device)
+            clipped_noise = torch.clamp(torch.normal(mean=self.target_noise_params[0], std=self.target_noise_params[1], size=a_target.shape), min=-self.target_noise_params[2], max=self.target_noise_params[2])
+            a_target_noisy = torch.clamp(a_target + clipped_noise, min=-1, max=1)
 
-            target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target_noisy), self.q2_target(s_n, a_target_noisy)).to(self.device)
+            target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target_noisy), self.q2_target(s_n, a_target_noisy))
         
         q1 = self.q1(s, a)
         loss1 = self.loss(q1, target)
@@ -104,8 +98,8 @@ class TD3:
         polyak_update(self.q2_target, self.q2, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
 
-    def train(self, num_episodes=5000):
-        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=True, device=self.device)
+    def train(self, num_episodes=5000, benchmark=False):
+        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
 
         steps = 0
         s, _ = env.reset()
@@ -119,7 +113,7 @@ class TD3:
             s_n, r, terminated, truncated, _ = env.step(a)
             d = terminated or truncated
 
-            self.buffer.append((s, a, r, s_n, d.to(torch.float32)))
+            self.buffer.append(s, a, r, s_n, d.to(torch.float32))
             s = s_n
 
             if d:
