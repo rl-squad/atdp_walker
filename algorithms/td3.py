@@ -8,7 +8,7 @@ from algorithms.common import (
     QNetwork,
     PolicyNetwork,
     ReplayBuffer,
-    OrnsteinUhlenbeckSampler,
+    GaussianSampler,
     copy_params,
     polyak_update,
     ACTION_DIM,
@@ -16,7 +16,7 @@ from algorithms.common import (
 )
     
 class TD3:
-    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, policy_delay=2, action_noise_params=[0, 0.2], target_noise_params=[0, 0.2, 0.2], gamma=0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995, device=DEFAULT_DEVICE):
+    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, policy_delay=2, exploration_noise_params=[0.0, 0.2], smoothing_noise_params=[0.0, 0.2, 0.2], gamma=0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995, device=DEFAULT_DEVICE):
         self.device = device
         self.q1 = QNetwork().to(device)
         self.q1_target = QNetwork().to(device)
@@ -25,15 +25,14 @@ class TD3:
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.noise_sampler = OrnsteinUhlenbeckSampler(mean=action_noise_params[0], sigma=action_noise_params[1], device=device)
+        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], size=ACTION_DIM, device=device)
+        self.smoothing_noise = GaussianSampler(mean=smoothing_noise_params[0], sigma=smoothing_noise_params[1], clip=(-smoothing_noise_params[2], smoothing_noise_params[2]), size=ACTION_DIM, device=device)
 
         self.batch_size = batch_size
         self.start_steps = start_steps
         self.update_after = update_after
         self.update_every = update_every
         self.policy_delay = policy_delay
-        self.action_noise_params = action_noise_params
-        self.target_noise_params = target_noise_params
         self.gamma = gamma
         self.polyak = polyak
 
@@ -53,8 +52,7 @@ class TD3:
         
     def noisy_policy_action(self, s):
         a = self.policy_action(s)
-
-        noise = self.noise_sampler.sample()
+        noise = self.exploration_noise.sample()
 
         return torch.clamp(a + noise, min=-1, max=1)
     
@@ -62,11 +60,8 @@ class TD3:
         s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
-            a_target = self.policy_target(s_n)
-            clipped_noise = torch.clamp(torch.normal(mean=self.target_noise_params[0], std=self.target_noise_params[1], size=a_target.shape), min=-self.target_noise_params[2], max=self.target_noise_params[2])
-            a_target_noisy = torch.clamp(a_target + clipped_noise, min=-1, max=1)
-
-            target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target_noisy), self.q2_target(s_n, a_target_noisy))
+            a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample(), min=-1, max=1)
+            target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target), self.q2_target(s_n, a_target))
         
         q1 = self.q1(s, a)
         loss1 = self.loss(q1, target)
@@ -106,7 +101,7 @@ class TD3:
 
         while not env.done():
             if steps < self.start_steps:
-                a = torch.distributions.Uniform(-1, 1).sample((ACTION_DIM,)).to(self.device)
+                a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
         

@@ -74,10 +74,10 @@ class TorchEnvironment(Environment):
         action = action.detach().cpu().numpy()
         observation, reward, terminated, truncated, info = super().step(action)
 
-        observation = torch.tensor(observation, dtype=torch.float32).to(self.device)
-        reward = torch.tensor(reward, dtype=torch.float32).to(self.device)
-        terminated = torch.tensor(terminated, dtype=torch.bool).to(self.device)
-        truncated = torch.tensor(truncated, dtype=torch.bool).to(self.device)
+        observation = torch.tensor(observation, dtype=torch.float32, device=self.device)
+        reward = torch.tensor(reward, dtype=torch.float32, device=self.device)
+        terminated = torch.tensor(terminated, dtype=torch.bool, device=self.device)
+        truncated = torch.tensor(truncated, dtype=torch.bool, device=self.device)
 
         if self.benchmark and self.current_step > 0 and self.current_step % self.benchmark_every == 0:
             self.benchmark_results.append(self._run_benchmark(self._policy_snapshot()))
@@ -94,7 +94,7 @@ class TorchEnvironment(Environment):
 
     def reset(self):
         s, info = super().reset()
-        s = torch.tensor(s, dtype=torch.float32).to(self.device)
+        s = torch.tensor(s, dtype=torch.float32, device=self.device)
 
         return s, info
     
@@ -114,7 +114,7 @@ class TorchEnvironment(Environment):
             s, _ = env.reset()
             
             while True:    
-                a = policy(torch.tensor(s, dtype=torch.float32).to(self.device)).detach().cpu().numpy()
+                a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
                 s, r, terminated, truncated, _ = env.step(a)
 
                 episode_rewards[i] += r

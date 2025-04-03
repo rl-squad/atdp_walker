@@ -7,7 +7,7 @@ STATE_DIM = 17
 ACTION_DIM = 6
 
 # declare a default device
-DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
 # this is the action value function over the State x Action space
 # modelled as a neural network with 2 hidden layers.
@@ -92,14 +92,14 @@ class ReplayBuffer:
         )
 
 class OrnsteinUhlenbeckSampler:
-    def __init__(self, size=ACTION_DIM, mean=0.0, sigma=0.2, theta=0.15, device=DEFAULT_DEVICE):
+    def __init__(self, mean=0.0, sigma=0.2, theta=0.15, size=ACTION_DIM, device=DEFAULT_DEVICE):
         self.mean = mean  # The long-term mean to which the process reverts
         self.sigma = sigma  # The magnitude of the noise
         self.theta = theta  # The speed of mean reversion
 
         # Initialize the state of the process
         self.device = device
-        self.state = torch.full((size,), mean, dtype=torch.float32).to(device)
+        self.state = torch.full((size,), mean, dtype=torch.float32, device=self.device)
 
     def sample(self):
         # Generate the noise based on the OU process formula:
@@ -111,6 +111,22 @@ class OrnsteinUhlenbeckSampler:
         self.state = self.state + noise
         
         return self.state
+    
+class GaussianSampler:
+    def __init__(self, mean=0.0, sigma=0.2, size=ACTION_DIM, clip=None, device=DEFAULT_DEVICE):
+        self.size = size
+        self.mean = mean
+        self.sigma = sigma
+        self.clip = clip
+        self.device = device
+    
+    def sample(self):
+        sample = torch.normal(mean=self.mean, std=self.sigma, size=(self.size,), device=self.device)
+
+        if self.clip is None:
+            return sample
+        
+        return torch.clamp(sample, min=self.clip[0], max=self.clip[1])
     
     # copies params from a source to a target network
 def copy_params(target_net, source_net):

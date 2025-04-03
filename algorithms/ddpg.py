@@ -8,7 +8,7 @@ from algorithms.common import (
     QNetwork,
     PolicyNetwork,
     ReplayBuffer,
-    OrnsteinUhlenbeckSampler,
+    GaussianSampler,
     copy_params,
     polyak_update,
     ACTION_DIM,
@@ -16,20 +16,19 @@ from algorithms.common import (
 )
 
 class DDPG:
-    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, action_noise_params=[0, 0.2], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995, device=DEFAULT_DEVICE):
+    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, exploration_noise_params=[0, 0.2], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995, device=DEFAULT_DEVICE):
         self.device = device
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.noise_sampler = OrnsteinUhlenbeckSampler(mean=action_noise_params[0], sigma=action_noise_params[1], device=device)
+        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], device=device)
         
         self.batch_size = batch_size
         self.start_steps = start_steps
         self.update_after = update_after
         self.update_every = update_every
-        self.action_noise_params = action_noise_params
         self.gamma = gamma
         self.polyak = polyak
 
@@ -50,12 +49,10 @@ class DDPG:
         with torch.no_grad():
             return self.policy(s)
 
-    # samples a policy action with random Ornstein Uhlenbeck noise
+    # samples a policy action with exploratory noise
     def noisy_policy_action(self, s):
-        a = self.policy_action(s)  
-        
-        # noise = torch.normal(mean=self.action_noise_params[0], std=self.action_noise_params[1], size=a.shape).to(device)
-        noise = self.noise_sampler.sample()
+        a = self.policy_action(s)
+        noise = self.exploration_noise.sample()
 
         return torch.clamp(a + noise, min=-1, max=1)
     
@@ -97,7 +94,7 @@ class DDPG:
 
         while not env.done():
             if steps < self.start_steps:
-                a = torch.distributions.Uniform(-1, 1).sample((ACTION_DIM,)).to(self.device)
+                a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
 
