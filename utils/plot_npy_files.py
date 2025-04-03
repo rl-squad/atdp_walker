@@ -30,7 +30,7 @@ def plot_1d_arrays():
         return
     
     # Create single figure
-    plt.figure(figsize=(20, 12))
+    plt.figure(figsize=(10, 6))
     
     # Plot all 1D arrays on same graph
     for arr, filename in zip(arrays, filenames):
