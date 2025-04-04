@@ -29,13 +29,15 @@ class DDPG:
         polyak=0.995,
         device=DEFAULT_DEVICE
     ):
+        e_mu, e_sigma = exploration_noise_params
+        
         self.device = device
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], device=device)
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         
         self.batch_size = batch_size
         self.start_steps = start_steps
