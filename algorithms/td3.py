@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 # local imports
-from environment import TorchEnvironment
+from environment import TorchEnvironment, BatchEnvironment
 from algorithms.common import (
     QNetwork,
     PolicyNetwork,
@@ -25,8 +25,8 @@ class TD3:
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], size=ACTION_DIM, device=device)
-        self.smoothing_noise = GaussianSampler(mean=smoothing_noise_params[0], sigma=smoothing_noise_params[1], clip=(-smoothing_noise_params[2], smoothing_noise_params[2]), size=ACTION_DIM, device=device)
+        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], device=device)
+        self.smoothing_noise = GaussianSampler(mean=smoothing_noise_params[0], sigma=smoothing_noise_params[1], clip=(-smoothing_noise_params[2], smoothing_noise_params[2]), device=device)
 
         self.batch_size = batch_size
         self.start_steps = start_steps
@@ -52,7 +52,7 @@ class TD3:
         
     def noisy_policy_action(self, s):
         a = self.policy_action(s)
-        noise = self.exploration_noise.sample()
+        noise = self.exploration_noise.sample(a.shape)
 
         return torch.clamp(a + noise, min=-1, max=1)
     
@@ -60,7 +60,8 @@ class TD3:
         s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
-            a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample(), min=-1, max=1)
+            a_target = self.policy_target(s_n)
+            a_target = torch.clamp(a_target + self.smoothing_noise.sample(a_target.shape), min=-1, max=1)
             target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target), self.q2_target(s_n, a_target))
         
         q1 = self.q1(s, a)
@@ -120,5 +121,34 @@ class TD3:
                 for i in range(self.update_every):
                     self.update(skip_policy_update=i % self.policy_delay != 0)
     
+    def train_batch(self, num_steps=1e6, batch_size=10, benchmark=False):
+        env = BatchEnvironment(num_steps=num_steps, batch_size=batch_size, policy=self.policy, benchmark=benchmark, device=self.device)
+        update_every = max((self.update_every // batch_size) * batch_size, batch_size)
+
+        s, _ = env.reset()
+        
+        while not env.done():
+            if env.get_current_step() < self.start_steps:
+                a = 2 * torch.rand((batch_size, ACTION_DIM), device=self.device) - 1
+            else:
+                a = self.noisy_policy_action(s)
+
+            s_n, r, terminated, truncated, info = env.step(a)
+            d = torch.logical_or(terminated, truncated)
+            
+            for i in range(batch_size):
+                if d[i]:
+                    s_n_actual = torch.tensor(info["final_obs"][i], dtype=torch.float32, device=self.device)
+                else:
+                    s_n_actual = s_n[i]
+
+                self.buffer.append(s[i], a[i], r[i], s_n_actual, d[i].to(torch.float32))
+            
+            s = s_n
+
+            if env.get_current_step() > self.update_after and env.get_current_step() % update_every == 0:
+                for i in range(update_every):
+                    self.update(skip_policy_update=i % self.policy_delay != 0)
+
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))

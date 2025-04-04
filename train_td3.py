@@ -1,4 +1,8 @@
 from algorithms.td3 import TD3
 
-td3 = TD3()
-td3.train(num_episodes=5000)
+def main():
+    td3 = TD3(update_every=50)
+    td3.train_batch(batch_size=10)
+
+if __name__ == "__main__":
+    main()
