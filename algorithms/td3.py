@@ -127,12 +127,11 @@ class TD3:
                 a = self.noisy_policy_action(s)
         
             s_n, r, terminated, truncated, _ = env.step(a)
-            d = terminated or truncated
 
-            self.buffer.append(s, a, r, s_n, d.to(torch.float32))
+            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32))
             s = s_n
 
-            if d:
+            if (terminated or truncated):
                 s, _ = env.reset()
 
             steps += 1
