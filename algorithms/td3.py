@@ -137,9 +137,9 @@ class TD3:
 
             steps += 1
 
-            if steps > self.update_after and steps % self.update_every == 0:
+            if (steps > self.update_after) and (steps % self.update_every == 0):
                 for i in range(self.update_every):
-                    self.update(skip_policy_update=i % self.policy_delay != 0)
+                    self.update(skip_policy_update=(i % self.policy_delay != 0))
     
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
