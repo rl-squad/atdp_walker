@@ -129,7 +129,7 @@ class TorchEnvironment(Environment):
     
 
 class BatchEnvironment:
-    def __init__(self, batch_size=10, num_steps=1000000, policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE):
+    def __init__(self, num_envs=10, num_steps=1000000, policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE):
         file_name = os.getenv("OUT")
         
         # no output dir raise value error
@@ -137,15 +137,15 @@ class BatchEnvironment:
             raise ValueError("no output file specified. please specify a file to output results to by setting the OUT environment variable")
 
         self.file_name = file_name
-        self.batch_size = batch_size
+        self.num_envs = num_envs
         self.num_steps = num_steps
         self.policy = policy
         self.benchmark = benchmark
-        self.benchmark_every = max((benchmark_every // batch_size) * batch_size, batch_size)
+        self.benchmark_every = max((benchmark_every // num_envs) * num_envs, num_envs)
         self.device = device
         self.current_step = 0
         self.envs = gym.vector.AsyncVectorEnv(
-            [lambda: gym.make("Walker2d-v5") for _ in range(batch_size)],
+            [lambda: gym.make("Walker2d-v5") for _ in range(num_envs)],
             autoreset_mode=gym.vector.AutoresetMode.SAME_STEP
         )
         self.pbar = tqdm(total=num_steps)
@@ -174,8 +174,8 @@ class BatchEnvironment:
             self.envs.close()
             self.pbar.close()
 
-        self.current_step += self.batch_size
-        self.pbar.update(self.batch_size)
+        self.current_step += self.num_envs
+        self.pbar.update(self.num_envs)
 
         return observation, reward, terminated, truncated, info
     

@@ -135,24 +135,24 @@ class TD3:
 
             if (steps > self.update_after) and (steps % self.update_every == 0):
                 for i in range(self.update_every):
-                    self.update(skip_policy_update=i % self.policy_delay != 0)
+                    self.update(skip_policy_update=(i % self.policy_delay != 0))
     
-    def train_batch(self, num_steps=1e6, batch_size=10, benchmark=False):
-        env = BatchEnvironment(num_steps=num_steps, batch_size=batch_size, policy=self.policy, benchmark=benchmark, device=self.device)
-        update_every = max((self.update_every // batch_size) * batch_size, batch_size)
+    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
+        env = BatchEnvironment(num_steps=num_steps, batch_size=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
+        update_every = max((self.update_every // num_envs) * num_envs, num_envs)
 
         s, _ = env.reset()
         
         while not env.done():
             if env.get_current_step() < self.start_steps:
-                a = 2 * torch.rand((batch_size, ACTION_DIM), device=self.device) - 1
+                a = 2 * torch.rand((num_envs, ACTION_DIM), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
 
             s_n, r, terminated, truncated, info = env.step(a)
             d = torch.logical_or(terminated, truncated)
             
-            for i in range(batch_size):
+            for i in range(num_envs):
                 if d[i]:
                     s_n_actual = torch.tensor(info["final_obs"][i], dtype=torch.float32, device=self.device)
                 else:
@@ -164,8 +164,6 @@ class TD3:
 
             if env.get_current_step() > self.update_after and env.get_current_step() % update_every == 0:
                 for i in range(update_every):
-                    self.update(skip_policy_update=i % self.policy_delay != 0)
-
                     self.update(skip_policy_update=(i % self.policy_delay != 0))
     
     def load_policy(self, path):
