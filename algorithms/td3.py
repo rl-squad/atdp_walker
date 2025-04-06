@@ -78,7 +78,7 @@ class TD3:
         s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
-            a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample(), min=-1, max=1)
+            a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)), min=-1, max=1)
             
             target = r + self.gamma * (1 - d) * torch.min(
                 self.q1_target(s_n, a_target),
@@ -145,7 +145,7 @@ class TD3:
         if self.update_every < num_envs:
             raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
-        env = BatchEnvironment(num_steps=num_steps, batch_size=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
+        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
         update_every = max((self.update_every // num_envs) * num_envs, num_envs)
 
         s, _ = env.reset()

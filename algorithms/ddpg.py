@@ -130,7 +130,7 @@ class DDPG:
         if self.update_every < num_envs:
             raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
-        env = BatchEnvironment(num_steps=num_steps, batch_size=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
+        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
         update_every = max((self.update_every // num_envs) * num_envs, num_envs)  
 
         s, _ = env.reset()
