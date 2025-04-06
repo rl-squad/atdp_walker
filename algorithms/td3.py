@@ -16,7 +16,25 @@ from algorithms.common import (
 )
     
 class TD3:
-    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, policy_delay=2, exploration_noise_params=[0.0, 0.2], smoothing_noise_params=[0.0, 0.2, 0.2], gamma=0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995, device=DEFAULT_DEVICE):
+    def __init__(
+        self,
+        buffer_size=1000000,
+        batch_size=128,
+        start_steps=10000,
+        update_after=1000,
+        update_every=50,
+        policy_delay=2,
+        exploration_noise_params=[0.0, 0.2],
+        smoothing_noise_params=[0.0, 0.2, 0.2],
+        gamma=0.99,
+        q_lr=1e-4,
+        policy_lr=1e-4,
+        polyak=0.995,
+        device=DEFAULT_DEVICE
+    ):
+        e_mu, e_sigma = exploration_noise_params
+        s_mu, s_sigma, s_clip = smoothing_noise_params
+        
         self.device = device
         self.q1 = QNetwork().to(device)
         self.q1_target = QNetwork().to(device)
@@ -25,8 +43,8 @@ class TD3:
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], device=device)
-        self.smoothing_noise = GaussianSampler(mean=smoothing_noise_params[0], sigma=smoothing_noise_params[1], clip=(-smoothing_noise_params[2], smoothing_noise_params[2]), device=device)
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
+        self.smoothing_noise = GaussianSampler(mean=s_mu, sigma=s_sigma, clip=(-s_clip, s_clip), device=device)
 
         self.batch_size = batch_size
         self.start_steps = start_steps
@@ -60,8 +78,7 @@ class TD3:
         s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
-            a_target = self.policy_target(s_n)
-            a_target = torch.clamp(a_target + self.smoothing_noise.sample(a_target.shape), min=-1, max=1)
+            a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample(), min=-1, max=1)
             target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target), self.q2_target(s_n, a_target))
         
         q1 = self.q1(s, a)
@@ -107,17 +124,16 @@ class TD3:
                 a = self.noisy_policy_action(s)
         
             s_n, r, terminated, truncated, _ = env.step(a)
-            d = terminated or truncated
 
-            self.buffer.append(s, a, r, s_n, d.to(torch.float32))
+            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32))
             s = s_n
 
-            if d:
+            if (terminated or truncated):
                 s, _ = env.reset()
 
             steps += 1
 
-            if steps > self.update_after and steps % self.update_every == 0:
+            if (steps > self.update_after) and (steps % self.update_every == 0):
                 for i in range(self.update_every):
                     self.update(skip_policy_update=i % self.policy_delay != 0)
     
@@ -150,5 +166,7 @@ class TD3:
                 for i in range(update_every):
                     self.update(skip_policy_update=i % self.policy_delay != 0)
 
+                    self.update(skip_policy_update=(i % self.policy_delay != 0))
+    
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))

@@ -16,14 +16,28 @@ from algorithms.common import (
 )
 
 class DDPG:
-    def __init__(self, buffer_size=1000000, batch_size=128, start_steps=10000, update_after=1000, update_every=50, exploration_noise_params=[0, 0.2], gamma = 0.99, q_lr=1e-4, policy_lr=1e-4, polyak=0.995, device=DEFAULT_DEVICE):
+    def __init__(
+        self,
+        buffer_size=1000000,
+        batch_size=128,
+        start_steps=10000,
+        update_after=1000,
+        update_every=50, exploration_noise_params=[0, 0.2],
+        gamma = 0.99,
+        q_lr=1e-4,
+        policy_lr=1e-4,
+        polyak=0.995,
+        device=DEFAULT_DEVICE
+    ):
+        e_mu, e_sigma = exploration_noise_params
+        
         self.device = device
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
         self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.exploration_noise = GaussianSampler(mean=exploration_noise_params[0], sigma=exploration_noise_params[1], device=device)
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         
         self.batch_size = batch_size
         self.start_steps = start_steps
@@ -99,17 +113,16 @@ class DDPG:
                 a = self.noisy_policy_action(s)
 
             s_n, r, terminated, truncated, _ = env.step(a)
-            d = terminated or truncated
             
-            self.buffer.append(s, a, r, s_n, d.to(torch.float32))
+            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32))
             s = s_n
             
-            if d:
+            if (terminated or truncated):
                 s, _ = env.reset()
             
             steps += 1
 
-            if steps > self.update_after and steps % self.update_every == 0:
+            if (steps > self.update_after) and (steps % self.update_every == 0):
                 for _ in range(self.update_every):
                     self.update()
     
