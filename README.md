@@ -62,5 +62,3 @@ rsync -uav username@server:~/out .
 # which grabs all .npy files from the directory which the command ran in
 python utils/plot_npy_files.py
 ```
-
-alpha0
