@@ -25,7 +25,7 @@ hare run -v $(pwd)/out:/app/out -it username/atdp
         # Example command:
         hare run --gpus device=0 -v $(pwd)/out:/app/out -it username/atdp
 
-        # Displays GPUs reserved for this running container 
+        # Displays GPUs reserved for this running container
         nvidia-smi
 
 # Starts agent training, replace filename to desired output file name
