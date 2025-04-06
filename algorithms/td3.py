@@ -79,7 +79,11 @@ class TD3:
 
         with torch.no_grad():
             a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample(), min=-1, max=1)
-            target = r + self.gamma * (1 - d) * torch.min(self.q1_target(s_n, a_target), self.q2_target(s_n, a_target))
+            
+            target = r + self.gamma * (1 - d) * torch.min(
+                self.q1_target(s_n, a_target),
+                self.q2_target(s_n, a_target)
+            )
         
         q1 = self.q1(s, a)
         loss1 = self.loss(q1, target)
