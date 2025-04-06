@@ -142,6 +142,9 @@ class TD3:
                     self.update(skip_policy_update=(i % self.policy_delay != 0))
     
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
+        if self.update_every < num_envs:
+            raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
+
         env = BatchEnvironment(num_steps=num_steps, batch_size=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
         update_every = max((self.update_every // num_envs) * num_envs, num_envs)
 
@@ -162,7 +165,7 @@ class TD3:
                 else:
                     s_n_actual = s_n[i]
 
-                self.buffer.append(s[i], a[i], r[i], s_n_actual, d[i].to(torch.float32))
+                self.buffer.append(s[i], a[i], r[i], s_n_actual, terminated[i].to(torch.float32))
             
             s = s_n
 
