@@ -90,38 +90,16 @@ class ReplayBuffer:
             self.next_states[indices],
             self.dones[indices],
         )
-
-class OrnsteinUhlenbeckSampler:
-    def __init__(self, mean=0.0, sigma=0.2, theta=0.15, size=ACTION_DIM, device=DEFAULT_DEVICE):
-        self.mean = mean  # The long-term mean to which the process reverts
-        self.sigma = sigma  # The magnitude of the noise
-        self.theta = theta  # The speed of mean reversion
-
-        # Initialize the state of the process
-        self.device = device
-        self.state = torch.full((size,), mean, dtype=torch.float32, device=self.device)
-
-    def sample(self):
-        # Generate the noise based on the OU process formula:
-        # x(t+1) = theta * (mu - x(t)) + sigma * N(0, 1)
-        # where N(0, 1) is a standard normal random variable
-        noise = self.theta * (self.mean - self.state) + self.sigma * torch.randn_like(self.state)
-        
-        # Update the state for the next step
-        self.state = self.state + noise
-        
-        return self.state
     
 class GaussianSampler:
-    def __init__(self, mean=0.0, sigma=0.2, size=ACTION_DIM, clip=None, device=DEFAULT_DEVICE):
-        self.size = size
+    def __init__(self, mean=0.0, sigma=0.2, clip=None, device=DEFAULT_DEVICE):
         self.mean = mean
         self.sigma = sigma
         self.clip = clip
         self.device = device
     
-    def sample(self):
-        sample = torch.normal(mean=self.mean, std=self.sigma, size=(self.size,), device=self.device)
+    def sample(self, size):
+        sample = torch.normal(mean=self.mean, std=self.sigma, size=size, device=self.device)
 
         if self.clip is None:
             return sample
