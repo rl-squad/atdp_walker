@@ -36,7 +36,7 @@ class DDPG:
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = ReplayBuffer(buffer_size, device=device)
+        self.buffer = ReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, device=device)
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         
         self.batch_size = batch_size
@@ -73,7 +73,7 @@ class DDPG:
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, d = self.buffer.sample(self.batch_size)
+        s, a, r, s_n, d = self.buffer.sample()
 
         with torch.no_grad():
             target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))

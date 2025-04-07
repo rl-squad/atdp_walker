@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import random
 
 # declaring the state and action dimensions as constants
 STATE_DIM = 17
@@ -52,18 +53,26 @@ class PolicyNetwork(nn.Module):
 # of a specified size from the buffer. this is used to bootstrap samples
 # for the Q and Policy network updates
 class ReplayBuffer:
-    def __init__(self, size, state_dim=STATE_DIM, action_dim=ACTION_DIM, device=DEFAULT_DEVICE):
-        self.size = size
+    def __init__(
+        self,
+        buffer_size=1000000,
+        batch_size=128,
+        state_dim=STATE_DIM,
+        action_dim=ACTION_DIM,
+        device=DEFAULT_DEVICE,
+    ):
+        self.buffer_size = buffer_size
+        self.batch_size = batch_size
         self.index = 0
         self.full = False
         self.device = device
 
         # Pre-allocate tensors on the specified device
-        self.states = torch.zeros((size, state_dim), device=device)
-        self.actions = torch.zeros((size, action_dim), device=device)
-        self.rewards = torch.zeros((size, 1), device=device)
-        self.next_states = torch.zeros((size, state_dim), device=device)
-        self.dones = torch.zeros((size, 1), device=device)
+        self.states = torch.zeros((buffer_size, state_dim), device=device)
+        self.actions = torch.zeros((buffer_size, action_dim), device=device)
+        self.rewards = torch.zeros((buffer_size, 1), device=device)
+        self.next_states = torch.zeros((buffer_size, state_dim), device=device)
+        self.dones = torch.zeros((buffer_size, 1), device=device)
 
     def append(self, state, action, reward, next_state, done):
         """Store a transition in pre-allocated tensor memory"""
@@ -74,14 +83,14 @@ class ReplayBuffer:
         self.dones[self.index] = done
 
         # Update circular buffer index
-        self.index = (self.index + 1) % self.size
+        self.index = (self.index + 1) % self.buffer_size
         if self.index == 0:
             self.full = True
 
-    def sample(self, batch_size):
+    def sample(self):
         """Efficiently sample tensors from pre-allocated memory"""
-        max_size = self.size if self.full else self.index
-        indices = torch.randint(0, max_size, (batch_size,), device=self.device)
+        max_size = self.buffer_size if self.full else self.index
+        indices = torch.randint(0, max_size, (self.batch_size,), device=self.device)
 
         return (
             self.states[indices],
@@ -90,7 +99,200 @@ class ReplayBuffer:
             self.next_states[indices],
             self.dones[indices],
         )
+
+class SumTree:
+    def __init__(
+        self,
+        buffer_size=1048576,
+        batch_size=128,
+        device=DEFAULT_DEVICE,
+        epsilon=1e-2,
+        alpha=0.7,
+        beta=0.5,
+    ):
+        self.device = device
+        self.batch_size = batch_size
+        self.epsilon = epsilon
+        self.alpha = alpha
+        self.beta = beta
+        self.values = torch.zeros(2 * buffer_size - 1, device=device)
+        # is_weights has length buffer size, each element is the is_weight of each transition
+        self.is_weights = torch.zeros(buffer_size, device=device)
+        self.buffer_size = buffer_size
+        self.max_is_weight_index = -1
+
+    def propagate(self, tree_index, diff):
+        """update the sums at all ancestor nodes node with the difference between old and new value"""
+        while tree_index > 0:
+            self.values[tree_index] += diff[0]
+            # traverse to immediate parent node
+            tree_index = (tree_index - 1) // 2
+        # finally update root
+        self.values[tree_index] += diff[0]
+
+    def calculate_is_weight(self, leaf_index):
+        """calculates the importance sampling weight used to correct for sampling bias"""
+        transition_probability = self.values[leaf_index] / self.values[0]
+        return (self.batch_size * transition_probability) ** (-1 * self.beta)
+
+    def add(self, buffer_index, td_error):
+        """adds new transition to the sum tree based on td error"""
+        leaf_index = buffer_index + (self.buffer_size - 1)
+
+        old_priority = self.values[leaf_index]
+        # proportional based prioritization
+        new_priority = (torch.abs(td_error) + self.epsilon) ** self.alpha
+        diff = new_priority - old_priority
+        self.propagate(leaf_index, diff)
+
+        is_weight = self.calculate_is_weight(leaf_index)
+
+        prev_max_is_weight_index = self.max_is_weight_index
+
+        # keep track of the max importance sampling weight
+        if is_weight >= self.is_weights[self.max_is_weight_index]:
+            self.max_is_weight_index = buffer_index
+        
+        # keep track of all is_weights
+        self.is_weights[buffer_index] = is_weight
+
+        # update if previous max index not equal to current max index
+        if self.max_is_weight_index != prev_max_is_weight_index:
+            self.max_is_weight_index = torch.argmax(self.is_weights)
+
+    def get_leaf_from_priority(self, tree_index, priority):
+        """returns the leaf index corresponding to a priority"""
+        if tree_index >= (self.buffer_size - 1):
+            return tree_index
+        left_value = self.values[2 * tree_index + 1]
+        if left_value >= priority:
+            return self.get_leaf_from_priority(2 * tree_index + 1, priority)
+        else:
+            return self.get_leaf_from_priority(2 * tree_index + 2, priority - left_value)
+
+    def _get_leaves_from_priorities(self, priorities: torch.Tensor) -> torch.Tensor:
+        """
+        Batched version of `get_leaf_from_priority`.
+        Args:
+            priorities: Tensor of shape [batch_size]
+        Returns:
+            leaf_indices: Tensor of shape [batch_size]
+        """
+        indices = torch.zeros_like(priorities, dtype=torch.int, device=self.device)  # Start at root (index 0)
+        while True:
+            left_children = 2 * indices + 1
+            right_children = left_children + 1
+            # Check if we've reached the leaves (left_children >= buffer_size)
+            is_leaf = left_children >= (self.buffer_size - 1)
+            if is_leaf.all():
+                break
+            # Compare priorities to left/right child values
+            left_values = self.values[left_children]
+            go_right = priorities > left_values
+            # Update indices and priorities
+            indices = torch.where(go_right, right_children, left_children)
+            priorities = torch.where(go_right, priorities - left_values, priorities)
+        return indices
+
+    def sample(self):
+        """
+        samples a buffer index from the tree based on its priority
+        returns a 2-tuple:
+            the buffer index of the transition,
+            the importance sampling weight of the transition
+        """
+        max_priority = self.values[0] # at the root of the tree
+        # priority uniformly sampled from range [0, max_priority)
+        sampled_priority = random.random() * max_priority
+        leaf_index = self.get_leaf_from_priority(0, sampled_priority)
+        buffer_index = leaf_index - (self.buffer_size - 1)
+        is_weight = self.is_weights[buffer_index]
+        normalised_weight = is_weight / self.is_weights[self.max_is_weight_index]
+        return buffer_index, normalised_weight
+
+    def _sample(self):
+        """
+        Samples multiple indices and weights in parallel.
+        Returns:
+            buffer_indices: Tensor of shape [batch_size]
+            normalised_weights: Tensor of shape [batch_size]
+        """
+        max_priority = self.values[0]  # Root node holds the sum of all priorities
+        # Sample `batch_size` priorities in parallel
+        sampled_priorities = torch.rand(self.batch_size, device=self.device) * max_priority
+        # Vectorized tree traversal (see below for implementation)
+        leaf_indices = self._get_leaves_from_priorities(sampled_priorities)
+        buffer_indices = leaf_indices - (self.buffer_size - 1)
+        # Batch-compute IS weights
+        is_weights = self.is_weights[buffer_indices]
+        normalised_weights = is_weights / self.is_weights[self.max_is_weight_index]
+        return buffer_indices, normalised_weights
+
+class PrioritisedReplayBuffer:
+    def __init__(
+        self,
+        buffer_size=1048576,
+        batch_size=128,
+        state_dim=STATE_DIM,
+        action_dim=ACTION_DIM,
+        device=DEFAULT_DEVICE,
+    ):
+        self.buffer_size = buffer_size
+        self.batch_size = batch_size
+        self.index = 0
+        self.device = device
+        self.sum_tree = SumTree(buffer_size=buffer_size, batch_size=batch_size, device=device)
+
+        # Pre-allocate tensors on the specified device
+        self.states = torch.zeros((buffer_size, state_dim), device=device)
+        self.actions = torch.zeros((buffer_size, action_dim), device=device)
+        self.rewards = torch.zeros((buffer_size, 1), device=device)
+        self.next_states = torch.zeros((buffer_size, state_dim), device=device)
+        self.dones = torch.zeros((buffer_size, 1), device=device)
+
+    def append(self, state, action, reward, next_state, done, td_error):
+        """Store a transition in pre-allocated tensor memory"""
+        
+        self.states[self.index] = state
+        self.actions[self.index] = action
+        self.rewards[self.index] = reward
+        self.next_states[self.index] = next_state
+        self.dones[self.index] = done
+        self.sum_tree.add(self.index, td_error)
+        self.index = (self.index + 1) % self.buffer_size
+
+    def sample(self):
+        """prioritised experience sampling"""
+
+        batch_indices = torch.zeros(self.batch_size, dtype=int, device=self.device)
+        normalised_is_weights = torch.zeros(self.batch_size, device=self.device)
+
+        # fill up a batch with indices, that correspond to the replay buffer, sampled from the SumTree
+        for batch_index in range(self.batch_size):
+            sampled_index, normalised_is_weight = self.sum_tree.sample()
+            batch_indices[batch_index] = sampled_index
+            normalised_is_weights[batch_index] = normalised_is_weight
+
+        return (
+            self.states[batch_indices],
+            self.actions[batch_indices],
+            self.rewards[batch_indices],
+            self.next_states[batch_indices],
+            self.dones[batch_indices],
+            normalised_is_weights
+        )
     
+    def _sample(self):
+        buffer_indices, normalised_is_weights = self.sum_tree._sample()
+        return (
+            self.states[buffer_indices],
+            self.actions[buffer_indices],
+            self.rewards[buffer_indices],
+            self.next_states[buffer_indices],
+            self.dones[buffer_indices],
+            normalised_is_weights
+        )
+
 class GaussianSampler:
     def __init__(self, mean=0.0, sigma=0.2, clip=None, device=DEFAULT_DEVICE):
         self.mean = mean
