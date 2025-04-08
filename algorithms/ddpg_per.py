@@ -73,7 +73,7 @@ class DDPGPER:
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, d, w = self.buffer.sample()
+        s, a, r, s_n, d, w = self.buffer._sample()
 
         with torch.no_grad():
             target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))

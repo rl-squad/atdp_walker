@@ -182,8 +182,8 @@ class SumTree:
         while True:
             left_children = 2 * indices + 1
             right_children = left_children + 1
-            # Check if we've reached the leaves (left_children >= buffer_size)
-            is_leaf = left_children >= (self.buffer_size - 1)
+            # Check if the current indices have reached the leaves
+            is_leaf = indices >= (self.buffer_size - 1)
             if is_leaf.all():
                 break
             # Compare priorities to left/right child values
