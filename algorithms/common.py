@@ -18,15 +18,19 @@ class QNetwork(nn.Module):
     def __init__(self, hidden_sizes=[256, 256]):
         super(QNetwork, self).__init__()
         input_dim = STATE_DIM + ACTION_DIM
+
         self.fc1 = nn.Linear(input_dim, hidden_sizes[0])
+        self.ln1 = nn.LayerNorm(hidden_sizes[0])
+
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.ln2 = nn.LayerNorm(hidden_sizes[1])
+
         self.out = nn.Linear(hidden_sizes[1], 1)
 
     def forward(self, state, action):
         x = torch.cat([state, action], dim=-1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        
+        x = F.relu(self.ln1(self.fc1(x)))
+        x = F.relu(self.ln2(self.fc2(x)))
         return self.out(x)
 
 # this is the policy network over the state space S
@@ -36,15 +40,21 @@ class QNetwork(nn.Module):
 class PolicyNetwork(nn.Module):
     def __init__(self, hidden_sizes=[256, 256]):
         super(PolicyNetwork, self).__init__()
+
         self.fc1 = nn.Linear(STATE_DIM, hidden_sizes[0])
+        self.ln1 = nn.LayerNorm(hidden_sizes[0])
+
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+        self.ln2 = nn.LayerNorm(hidden_sizes[1])
+
         self.out = nn.Linear(hidden_sizes[1], ACTION_DIM)
 
     def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
+        x = F.relu(self.ln1(self.fc1(state)))
+        x = F.relu(self.ln2(self.fc2(x)))
         action = torch.tanh(self.out(x))
         return action
+
 
 # this is a utility class that constructs a buffer of a specified size
 # and begins overwriting from the start once full. this class also
