@@ -22,7 +22,8 @@ class DDPGPER:
         batch_size=128,
         start_steps=10000,
         update_after=1000,
-        update_every=50, exploration_noise_params=[0, 0.2],
+        update_every=50,
+        exploration_noise_params=[0, 0.2],
         gamma = 0.99,
         q_lr=1e-4,
         policy_lr=1e-4,
@@ -70,17 +71,24 @@ class DDPGPER:
 
         return torch.clamp(a + noise, min=-1, max=1)
     
+    def calculate_td_error(self, s, a, r, s_n, terminated):
+        with torch.no_grad():
+            target = r + self.gamma * terminated.to(torch.float32) * self.q_target(s_n, self.policy_target(s_n))
+            q = self.q(s, a)
+            return target - q
+
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, d, w = self.buffer._sample()
+        s, a, r, s_n, t, w, buffer_indices = self.buffer._sample()
 
         with torch.no_grad():
-            target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))
+            target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
 
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
         q = self.q(s, a)
+        # Fold IS weights into q-learning update
         loss = self.loss(w * q, w * target)
 
         self.q_optimizer.zero_grad()
@@ -99,6 +107,9 @@ class DDPGPER:
         polyak_update(self.q_target, self.q, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
 
+        # update priorities of sampled transitions
+        td_errors = self.calculate_td_error(s, a, r, s_n, t)
+        self.buffer.update_priorities(buffer_indices, self.calculate_td_error(s, a, r, s_n, t))
 
     def train(self, num_episodes=5000, benchmark=False):
         env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
@@ -113,13 +124,9 @@ class DDPGPER:
                 a = self.noisy_policy_action(s)
 
             s_n, r, terminated, truncated, _ = env.step(a)
+            td_error = self.calculate_td_error(s, a, r, s_n, terminated)
             
-            with torch.no_grad():
-                target = r + self.gamma * terminated.to(torch.float32) * self.q_target(s_n, self.policy_target(s_n))
-                q = self.q(s, a)
-                abs_td_error = torch.abs(target - q)
-
-            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32), abs_td_error)
+            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32), td_error)
             s = s_n
             
             if (terminated or truncated):

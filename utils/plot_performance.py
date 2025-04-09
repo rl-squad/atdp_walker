@@ -46,7 +46,7 @@ def plot_performance():
     
     # Add plot decorations
     plt.title("Performance")
-    plt.xlabel("Timestep * 1e-4")
+    plt.xlabel("Timestep * 1e4")
     plt.ylabel("Mean Episode Reward")
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # Legend outside plot
     plt.grid(True, alpha=0.3)
