@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
 
 # declaring the state and action dimensions as constants
 STATE_DIM = 17
@@ -107,8 +106,8 @@ class SumTree:
         batch_size=128,
         device=DEFAULT_DEVICE,
         epsilon=1e-2,
-        alpha=0.7,
-        beta_zero=0.4, # optimal ß0 for proportional based priority according to Schaul et al
+        alpha=0.6, # optimal alpha for proportional based priority according to Schaul et al
+        beta_zero=0.4, # optimal beta-initial
     ):
         self.device = device
         self.batch_size = batch_size
@@ -126,71 +125,95 @@ class SumTree:
         self.beta_start = 1000 # start updates at 1000 steps
         self.beta_current_steps = self.beta_start
 
-    def propagate(self, tree_indices, diffs):
-        """update the sums at all ancestor nodes node with the differences between old and new values"""
+    def recalculate_max_is_weight_index(self):
+        self.max_is_weight_index = torch.argmax(self.is_weights)
+
+    def propagate_batch(self, tree_indices, diffs):
+        """batch update the sums at all ancestor nodes with the differences between old and new values"""
         while True:
-            is_root = tree_indices > 0
+            is_root = (tree_indices == 0)
             if is_root.all():
                 break
             self.values[tree_indices] += diffs
-            # traverse to immediate parent node
+            # traverse to immediate parent nodes
             tree_indices = (tree_indices - 1) // 2
         # finally update root
-        self.values[tree_indices] += diffs
+        # print(self.values[0])
+        self.values[tree_indices] += diffs # Does not work as intended
+        # print(diffs)
+        # print(diffs.sum())
+        # print(self.values[0])
 
-    def calculate_is_weights(self, leaf_indices):
-        """calculates the importance sampling weights used to correct for sampling bias"""
+    def propagate(self, tree_index, diff):
+        """update the sums at all ancestor nodes node with the difference between old and new value"""
+        while tree_index > 0:
+            self.values[tree_index] += diff[0]
+            # traverse to immediate parent node
+            tree_index = (tree_index - 1) // 2
+        # finally update root
+        self.values[tree_index] += diff[0]
+
+    def calculate_is_weight(self, leaf_indices):
+        """
+        batch-aware and single-sample is_weight calculation,
+        calculates the importance sampling weight used to correct for sampling bias,
+        """
         transition_probabilities = self.values[leaf_indices] / self.values[0]
         return (self.batch_size * transition_probabilities) ** (-1 * self.beta)
 
-    def add(self, buffer_indices, td_errors):
+    def add_batch(self, buffer_indices, td_errors):
         """adds a batch of transitions to the sum tree using td errors"""
         leaf_indices = buffer_indices + (self.buffer_size - 1)
-
         old_priorities = self.values[leaf_indices]
         # proportional based prioritization
         new_priorities = (torch.abs(td_errors) + self.epsilon) ** self.alpha
         diffs = new_priorities - old_priorities
-        self.propagate(leaf_indices, diffs)
-
-        is_weights = self.calculate_is_weights(leaf_indices)
-        # keep track of all is_weights
+        self.propagate_batch(leaf_indices, diffs)
+        # calculate is_weights after full sum_tree update
+        is_weights = self.calculate_is_weight(leaf_indices)
+        # store all is_weights
         self.is_weights[buffer_indices] = is_weights
-        # recompute max is_weight
-        current_max = self.is_weights[self.max_is_weight_index]
-        if is_weights.max() > current_max:
-            self.max_is_weight_index = torch.argmax(self.is_weights)
 
-    # def get_leaf_from_priority(self, tree_index, priority):
-    #     """returns the leaf index corresponding to a priority"""
-    #     if tree_index >= (self.buffer_size - 1):
-    #         return tree_index
-    #     left_value = self.values[2 * tree_index + 1]
-    #     if left_value >= priority:
-    #         return self.get_leaf_from_priority(2 * tree_index + 1, priority)
-    #     else:
-    #         return self.get_leaf_from_priority(2 * tree_index + 2, priority - left_value)
+    def add(self, buffer_index, td_error):
+        """adds new transition to the sum tree based on td error"""
+        leaf_index = buffer_index + (self.buffer_size - 1)
+        # proportional based prioritization
+        new_priority = (torch.abs(td_error) + self.epsilon) ** self.alpha
+        old_priority = self.values[leaf_index]
+        diff = new_priority - old_priority
+        # propagate diff from leaf to root
+        self.propagate(leaf_index, diff)
 
-    def _get_leaves_from_priorities(self, priorities: torch.Tensor) -> torch.Tensor:
-        """
-        Batched version of `get_leaf_from_priority`.
-        Args:
-            priorities: Tensor of shape [batch_size]
-        Returns:
-            leaf_indices: Tensor of shape [batch_size]
-        """
-        indices = torch.zeros_like(priorities, dtype=torch.int, device=self.device)  # Start at root (index 0)
+        is_weight = self.calculate_is_weight(leaf_index)
+
+        prev_max_is_weight_index = self.max_is_weight_index
+
+        # keep track of the max importance sampling weight
+        if is_weight >= self.is_weights[self.max_is_weight_index]:
+            self.max_is_weight_index = buffer_index
+
+        # store all is_weights
+        self.is_weights[buffer_index] = is_weight
+
+        # update if previous max index not equal to current max index
+        if self.max_is_weight_index != prev_max_is_weight_index:
+            self.recalculate_max_is_weight_index()
+
+    def get_leaves_from_priorities(self, priorities):
+        """returns leaf_indices corresponding to the priorities batch"""
+        # each index starts at root node
+        indices = torch.zeros_like(priorities, dtype=torch.int, device=self.device)
         while True:
             left_children = 2 * indices + 1
             right_children = left_children + 1
-            # Check if the current indices have reached the leaves
+            # check if the current indices have all reached the leaves
             is_leaf = indices >= (self.buffer_size - 1)
             if is_leaf.all():
                 break
-            # Compare priorities to left/right child values
+            # compare priorities to left/right child values
             left_values = self.values[left_children]
             go_right = priorities > left_values
-            # Update indices and priorities
+            # update indices and priorities
             indices = torch.where(go_right, right_children, left_children)
             priorities = torch.where(go_right, priorities - left_values, priorities)
         return indices
@@ -201,39 +224,17 @@ class SumTree:
                     (self.beta_end - self.beta_start)
         
         self.beta = min(self.beta_zero + (1 - self.beta_zero) * progress, 1.0)
-        # Note: dependent on how many steps made when _sample is called
-        self.beta_current_steps += 1
+        # TODO dependent on how many steps made when sample_batch is called
+        self.beta_current_steps += 10
 
-    # def sample(self):
-    #     """
-    #     samples a buffer index from the tree based on its priority
-    #     returns a 2-tuple:
-    #         the buffer index of the transition,
-    #         the importance sampling weight of the transition
-    #     """
-    #     max_priority = self.values[0] # at the root of the tree
-    #     # priority uniformly sampled from range [0, max_priority)
-    #     sampled_priority = random.random() * max_priority
-    #     leaf_index = self.get_leaf_from_priority(0, sampled_priority)
-    #     buffer_index = leaf_index - (self.buffer_size - 1)
-    #     is_weight = self.is_weights[buffer_index]
-    #     normalised_weight = is_weight / self.is_weights[self.max_is_weight_index]
-    #     return buffer_index, normalised_weight
-
-    def _sample(self):
-        """
-        Samples multiple indices and weights in parallel.
-        Returns:
-            buffer_indices: Tensor of shape [batch_size]
-            normalised_weights: Tensor of shape [batch_size]
-        """
-        max_priority = self.values[0]  # Root node holds the sum of all priorities
-        # Sample `batch_size` priorities in parallel
-        sampled_priorities = torch.rand(self.batch_size, device=self.device) * max_priority
-        # Vectorized tree traversal (see below for implementation)
-        leaf_indices = self._get_leaves_from_priorities(sampled_priorities)
+    def sample_batch(self):
+        """samples buffer_indices and calculates normalised weights in parallel"""
+        sum_all_priorities = self.values[0] # root node
+        sampled_priorities = torch.rand(self.batch_size, device=self.device) * sum_all_priorities
+        # vectorized root-to-leaf traversal
+        leaf_indices = self.get_leaves_from_priorities(sampled_priorities)
         buffer_indices = leaf_indices - (self.buffer_size - 1)
-        # Batch-compute IS weights
+        # batch-compute weights
         is_weights = self.is_weights[buffer_indices]
         normalised_weights = is_weights / self.is_weights[self.max_is_weight_index]
 
@@ -254,6 +255,7 @@ class PrioritisedReplayBuffer:
         self.buffer_size = buffer_size
         self.batch_size = batch_size
         self.index = 0
+        self.full = False
         self.device = device
         self.sum_tree = SumTree(buffer_size=buffer_size, batch_size=batch_size, device=device)
 
@@ -266,39 +268,20 @@ class PrioritisedReplayBuffer:
 
     def append(self, state, action, reward, next_state, done, td_error):
         """Store a transition in pre-allocated tensor memory"""
-        
         self.states[self.index] = state
         self.actions[self.index] = action
         self.rewards[self.index] = reward
         self.next_states[self.index] = next_state
         self.is_terminal[self.index] = done
+        # add priority to sum tree
         self.sum_tree.add(self.index, td_error)
         self.index = (self.index + 1) % self.buffer_size
+        if self.index == 0:
+            self.full = True
 
-    def sample(self):
-        """prioritised experience sampling"""
-
-        batch_indices = torch.zeros(self.batch_size, dtype=int, device=self.device)
-        normalised_is_weights = torch.zeros(self.batch_size, device=self.device)
-
-        # fill up a batch with indices, that correspond to the replay buffer, sampled from the SumTree
-        for batch_index in range(self.batch_size):
-            sampled_index, normalised_is_weight = self.sum_tree.sample()
-            batch_indices[batch_index] = sampled_index
-            normalised_is_weights[batch_index] = normalised_is_weight
-
-        return (
-            self.states[batch_indices],
-            self.actions[batch_indices],
-            self.rewards[batch_indices],
-            self.next_states[batch_indices],
-            self.is_terminal[batch_indices],
-            normalised_is_weights
-        )
-    
-    def _sample(self):
+    def sample_batch(self):
         """batched prioritised experience sampling"""
-        buffer_indices, normalised_is_weights = self.sum_tree._sample()
+        buffer_indices, normalised_is_weights = self.sum_tree.sample_batch()
         return (
             self.states[buffer_indices],
             self.actions[buffer_indices],
@@ -309,20 +292,32 @@ class PrioritisedReplayBuffer:
             buffer_indices
         )
 
-    def update_priorities(self, buffer_indices, td_errors):
-        """updates the priorities of a batch of buffer_indices"""
-        self.sum_tree.add(buffer_indices, td_errors)
+    def recalculate_priorities(self, buffer_indices, td_errors):
+        """recalculate the priorities at the given buffer_indices"""
 
-    def update_all_priorities(self, calculate_td_error):
-        """update all priorities in the buffer"""        
-        for i in range(self.buffer_size):
-            s = self.states[i]
-            a = self.actions[i]
-            r = self.rewards[i]
-            s_n = self.next_states[i]
-            terminated = self.is_terminal[i]
-            td_error = calculate_td_error(s, a, r, s_n, terminated)
-            self.sum_tree.add(i, td_error)
+        # for i in range(len(buffer_indices)):
+        #     self.sum_tree.add(buffer_indices[i], td_errors[i])
+
+        self.sum_tree.add_batch(buffer_indices, td_errors)
+        # # recalculate max is_weight
+        self.sum_tree.recalculate_max_is_weight_index()
+
+    def recalc_all_prios(self, calculate_td_errors_batch):
+        """recalculate all priorities in the buffer, splitting the update into chunks"""
+        max_size = self.buffer_size if self.full else self.index
+        valid_indices = torch.arange(max_size, device=self.device)
+        chunk_size = min(4096, max_size)
+        for i in range(0, max_size, chunk_size):
+            chunk_indices = valid_indices[i:i + chunk_size]
+            s = self.states[chunk_indices].squeeze()
+            a = self.actions[chunk_indices].squeeze()
+            r = self.rewards[chunk_indices]
+            s_n = self.next_states[chunk_indices].squeeze()
+            t = self.is_terminal[chunk_indices]
+            td_errors = calculate_td_errors_batch(s, a, r, s_n, t)
+            self.sum_tree.add_batch(chunk_indices.unsqueeze(1), td_errors)
+        # recalculate max is_weight
+        self.sum_tree.recalculate_max_is_weight_index()
 
 class GaussianSampler:
     def __init__(self, mean=0.0, sigma=0.2, clip=None, device=DEFAULT_DEVICE):
@@ -339,7 +334,7 @@ class GaussianSampler:
         
         return torch.clamp(sample, min=self.clip[0], max=self.clip[1])
     
-    # copies params from a source to a target network
+# copies params from a source to a target network
 def copy_params(target_net, source_net):
     for target_param, source_param in zip(target_net.parameters(), source_net.parameters()):
         target_param.data.copy_(source_param.data)
