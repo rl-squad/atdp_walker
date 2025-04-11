@@ -142,6 +142,7 @@ class BatchEnvironment:
         self.policy = policy
         self.benchmark = benchmark
         self.benchmark_every = max((benchmark_every // num_envs) * num_envs, num_envs)
+        self.benchmark_results = []
         self.device = device
         self.current_step = 0
         self.envs = gym.vector.AsyncVectorEnv(
@@ -161,6 +162,9 @@ class BatchEnvironment:
         terminated = torch.tensor(terminated, dtype=torch.bool, device=self.device)
         truncated = torch.tensor(truncated, dtype=torch.bool, device=self.device)
 
+        self.current_step += self.num_envs
+        self.pbar.update(self.num_envs)
+
         if self.benchmark and self.current_step > 0 and self.current_step % self.benchmark_every == 0:
             self.benchmark_results.append(self._run_benchmark(self._policy_snapshot()))
 
@@ -173,9 +177,6 @@ class BatchEnvironment:
         if self.done():
             self.envs.close()
             self.pbar.close()
-
-        self.current_step += self.num_envs
-        self.pbar.update(self.num_envs)
 
         return observation, reward, terminated, truncated, info
     
