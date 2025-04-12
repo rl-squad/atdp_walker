@@ -124,7 +124,7 @@ class SumTree:
 
         self.beta_zero = beta_zero
         self.beta = beta_zero
-        self.beta_end = 400000 # schedule should finish by 400,000 steps
+        self.beta_end = 1000000 # schedule should finish by 1,000,000 steps
         self.beta_start = 1000 # start updates at 1000 steps
         self.beta_current_steps = self.beta_start
 
@@ -164,7 +164,7 @@ class SumTree:
                 # finally update root
                 self.values.scatter_add_(0, tree_indices, diffs)
                 return
-
+            # update sums at this level of the tree
             self.values.scatter_add_(0, tree_indices, diffs)
             # traverse to immediate parent nodes
             tree_indices = (tree_indices - 1) // 2
@@ -360,6 +360,17 @@ class PrioritisedReplayBuffer:
 
     def recalculate_priorities(self, buffer_indices, td_errors):
         """batch update the priorities at the given buffer_indices"""
+        # Must remove duplicate buffer indices before propagating from leaves
+        buffer_indices_no_duplicates = []
+        td_errors_no_duplicates = []
+        seen = set()
+        for i in range(len(buffer_indices)):
+            if buffer_indices[i].item() not in seen:
+                seen.add(buffer_indices[i].item())
+                buffer_indices_no_duplicates.append(buffer_indices[i].item())
+                td_errors_no_duplicates.append(td_errors[i].item())
+        buffer_indices = torch.tensor(buffer_indices_no_duplicates, device=self.device)
+        td_errors = torch.tensor(td_errors_no_duplicates, device=self.device)
         self.sum_tree.batch_update(buffer_indices, td_errors)
 
 class GaussianSampler:

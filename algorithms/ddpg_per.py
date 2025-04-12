@@ -21,7 +21,7 @@ class DDPGPER:
         buffer_size=1048576, # Closest power of 2 to 1 mill
         batch_size=128,
         start_steps=10000,
-        update_after=1000,
+        update_after=10000,
         update_every=50,
         exploration_noise_params=[0, 0.2],
         gamma = 0.99,
@@ -172,9 +172,9 @@ class DDPGPER:
             
             s = s_n
 
-            if (env.get_current_step() > self.update_after) and (env.get_current_step() % update_every == 0):
+            if (env.get_current_step() > self.update_after):
                 # update networks
-                for _ in range(self.update_every):
+                for _ in range(4):
                     self.update()
 
     def load_policy(self, path):
