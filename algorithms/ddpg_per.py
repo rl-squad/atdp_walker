@@ -23,7 +23,6 @@ class DDPGPER:
         start_steps=10000,
         update_after=1000,
         update_every=50,
-        recalculate_all_priorities_every=1000,
         exploration_noise_params=[0, 0.2],
         gamma = 0.99,
         q_lr=1e-4,
@@ -41,7 +40,6 @@ class DDPGPER:
         self.buffer = PrioritisedReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, device=device)
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
 
-        self.recalc_all_prios_every = recalculate_all_priorities_every
         self.batch_size = batch_size
         self.start_steps = start_steps
         self.update_after = update_after
@@ -95,7 +93,7 @@ class DDPGPER:
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
         q = self.q(s, a)
-        # Fold IS weights into q-learning update
+        # Fold normalised importance sampling weights into q-learning update
         loss = self.loss(w * q, w * target)
 
         self.q_optimizer.zero_grad()
@@ -114,9 +112,9 @@ class DDPGPER:
         polyak_update(self.q_target, self.q, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
 
-        # recalculate priorities of sampled transitions after network updates
+        # After network updates, recalculate priorities of sampled transitions only
         td_errors = self.calculate_td_error(s, a, r, s_n, t)
-        self.buffer.recalculate_priorities(buffer_indices.unsqueeze(1), td_errors)
+        self.buffer.recalculate_priorities(buffer_indices, td_errors.squeeze())
 
     def train(self, num_episodes=5000, benchmark=False):
         env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
@@ -131,9 +129,9 @@ class DDPGPER:
                 a = self.noisy_policy_action(s)
 
             s_n, r, terminated, truncated, _ = env.step(a)
-            td_error = self.calculate_td_error(s, a, r, s_n, terminated)
-            
-            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32), td_error)
+
+            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32))
+
             s = s_n
             
             if (terminated or truncated):
@@ -141,14 +139,10 @@ class DDPGPER:
             
             steps += 1
 
-            if steps > self.update_after:
+            if (steps > self.update_after) and (steps % self.update_every == 0):
                 # update networks
-                if steps % self.update_every == 0:
-                    for _ in range(self.update_every):
-                        self.update()
-                # periodically recalculate priorities of all transitions in the buffer
-                # if steps % self.recalc_all_prios_every == 0:
-                    # self.buffer.recalc_all_prios(self.calculate_td_error)
+                for _ in range(self.update_every):
+                    self.update()
 
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
         if self.update_every < num_envs:
@@ -156,7 +150,6 @@ class DDPGPER:
 
         env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
         update_every = max((self.update_every // num_envs) * num_envs, num_envs)
-        recalc_all_prios_every = max((self.recalc_all_prios_every // num_envs) * num_envs, num_envs)
 
         s, _ = env.reset()
         
@@ -175,19 +168,14 @@ class DDPGPER:
                 else:
                     s_n_actual = s_n[i]
 
-                td_error = self.calculate_td_error(s[i], a[i], r[i], s_n_actual, terminated[i].to(torch.float32))
-                self.buffer.append(s[i], a[i], r[i], s_n_actual, terminated[i].to(torch.float32), td_error)
+                self.buffer.append(s[i], a[i], r[i], s_n_actual, terminated[i].to(torch.float32))
             
             s = s_n
 
-            if env.get_current_step() > self.update_after:
+            if (env.get_current_step() > self.update_after) and (env.get_current_step() % update_every == 0):
                 # update networks
-                if env.get_current_step() % update_every == 0:
-                    for _ in range(self.update_every):
-                        self.update()
-                # periodically recalculate priorities of all transitions in the buffer
-                # if env.get_current_step() % recalc_all_prios_every == 0:
-                #     self.buffer.recalc_all_prios(self.calculate_td_error)
+                for _ in range(self.update_every):
+                    self.update()
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
