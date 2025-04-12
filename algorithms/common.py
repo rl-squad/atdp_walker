@@ -187,7 +187,9 @@ class SumTree:
 
         # If the sampled buffer indices contained the max priority index,
         # must recalculate after overwrite to reduce staleness
-        if self.max_prio_buffer_index in buffer_indices:
+        overwriting_max_prio_index = (self.max_prio_buffer_index in buffer_indices)
+
+        if overwriting_max_prio_index:
             self.max_prio_buffer_index = torch.argmax(self.values[self.buffer_to_leaf(0):])
         else:
             max_prio = self.values[self.buffer_to_leaf(self.max_prio_buffer_index)]
@@ -199,7 +201,9 @@ class SumTree:
 
         # If the sampled buffer indices contained the max is_weight index,
         # must recalculate after overwrite to reduce staleness
-        if self.max_is_weight_buffer_index in buffer_indices:
+        overwriting_max_is_weight_index = (self.max_is_weight_buffer_index in buffer_indices)
+        
+        if overwriting_max_is_weight_index:
             self.recalculate_max_is_weight_index()
         else:
             max_is_weight = self.is_weights[self.max_is_weight_buffer_index]
