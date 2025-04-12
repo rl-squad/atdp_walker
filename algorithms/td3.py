@@ -141,7 +141,7 @@ class TD3:
                 for i in range(self.update_every):
                     self.update(skip_policy_update=(i % self.policy_delay != 0))
     
-    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=True):
+    def train_batch(self, num_steps=6e6, num_envs=10, benchmark=True):
         if self.update_every < num_envs:
             raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
