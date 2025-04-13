@@ -71,13 +71,13 @@ class DDPGPER:
 
         return torch.clamp(a + noise, min=-1, max=1)
 
-    def calculate_td_error(self, s, a, r, s_n, terminated):
+    def calculate_td_error(self, s, a, r, s_n, t):
         """
         batch-aware and single-sample td error calculation
         terminated must be passed as a float32
         """
         with torch.no_grad():
-            target = r + self.gamma * terminated * self.q_target(s_n, self.policy_target(s_n))
+            target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
             q = self.q(s, a)
             td_error = target - q
             return td_error

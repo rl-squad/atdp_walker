@@ -125,7 +125,7 @@ class SumTree:
         self.beta_zero = beta_zero
         self.beta = beta_zero
         self.beta_end = 1000000 # schedule should finish by 1,000,000 steps
-        self.beta_start = 1000 # start updates at 1000 steps
+        self.beta_start = 10000 # start updates at 10,000 steps
         self.beta_current_steps = self.beta_start
 
     def buffer_to_leaf(self, buffer):
@@ -240,6 +240,7 @@ class SumTree:
             max_prio_leaf_index = self.buffer_to_leaf(self.max_prio_buffer_index)
             priority = self.values[max_prio_leaf_index]
 
+        # update sum tree priorities
         self.propagate(leaf_index, priority)
 
         is_weight = self.calculate_is_weight(leaf_index)
