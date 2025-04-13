@@ -18,10 +18,9 @@ from algorithms.common import (
 class DDPGPER:
     def __init__(
         self,
-        buffer_size=1048576, # Closest power of 2 to 1 mill
+        buffer_size=2**20, # Closest power of 2 to 1 mill
         batch_size=128,
-        start_steps=10000,
-        update_after=10000,
+        begin_learning=10000,
         update_every=50,
         exploration_noise_params=[0, 0.2],
         gamma = 0.99,
@@ -37,12 +36,11 @@ class DDPGPER:
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = PrioritisedReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, device=device)
+        self.buffer = PrioritisedReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, begin_learning=begin_learning, device=device)
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
 
         self.batch_size = batch_size
-        self.start_steps = start_steps
-        self.update_after = update_after
+        self.begin_learning = begin_learning
         self.update_every = update_every
         self.gamma = gamma
         self.polyak = polyak
@@ -123,7 +121,7 @@ class DDPGPER:
         s, _ = env.reset()
 
         while not env.done():
-            if steps < self.start_steps:
+            if steps < self.begin_learning:
                 a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -139,7 +137,7 @@ class DDPGPER:
             
             steps += 1
 
-            if (steps > self.update_after) and (steps % self.update_every == 0):
+            if (steps > self.begin_learning) and (steps % self.update_every == 0):
                 # update networks
                 for _ in range(self.update_every):
                     self.update()
@@ -154,7 +152,7 @@ class DDPGPER:
         s, _ = env.reset()
         
         while not env.done():
-            if env.get_current_step() < self.start_steps:
+            if env.get_current_step() < self.begin_learning:
                 a = 2 * torch.rand((num_envs, ACTION_DIM), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -172,10 +170,12 @@ class DDPGPER:
             
             s = s_n
 
-            if (env.get_current_step() > self.update_after):
+            if env.get_current_step() > self.begin_learning:
                 # update networks
-                for _ in range(4):
+                for _ in range(num_envs):
                     self.update()
+                # beta schedule for annealling bias of PER sampling after updates
+                self.buffer.sum_tree.anneal_beta(steps=num_envs)
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))

@@ -104,6 +104,7 @@ class SumTree:
         self,
         buffer_size=2**20,
         batch_size=128,
+        begin_learning=10000,
         device=DEFAULT_DEVICE,
         epsilon=1e-2, # added to abs tderr to prevent non-zero priorities
         alpha=0.6, # optimal alpha for proportional based priority according to Schaul et al
@@ -125,7 +126,7 @@ class SumTree:
         self.beta_zero = beta_zero
         self.beta = beta_zero
         self.beta_end = 1000000 # schedule should finish by 1,000,000 steps
-        self.beta_start = 10000 # start updates at 10,000 steps
+        self.beta_start = begin_learning # learning updates/non-random policy starts at 10,000 steps
         self.beta_current_steps = self.beta_start
 
     def buffer_to_leaf(self, buffer):
@@ -278,14 +279,15 @@ class SumTree:
             priorities = torch.where(go_right, priorities - left_values, priorities)
         return tree_indices
 
-    def anneal_beta(self):
+    def anneal_beta(self, steps=1):
         """increase correction for sampling bias"""
+        if self.beta == 1.0:
+            return
         progress = (self.beta_current_steps - self.beta_start) / \
                     (self.beta_end - self.beta_start)
         
         self.beta = min(self.beta_zero + (1 - self.beta_zero) * progress, 1.0)
-        # TODO dependent on how many steps made when sample_batch is called
-        self.beta_current_steps += 10
+        self.beta_current_steps += steps
 
     def sample_batch(self):
         """
@@ -301,9 +303,6 @@ class SumTree:
         # batch-compute weights
         is_weights = self.is_weights[buffer_indices]
         normalised_weights = is_weights / self.is_weights[self.max_is_weight_buffer_index]
-        # beta schedule
-        if self.beta != 1.0:
-            self.anneal_beta()
         return buffer_indices, normalised_weights
 
 class PrioritisedReplayBuffer:
@@ -311,6 +310,7 @@ class PrioritisedReplayBuffer:
         self,
         buffer_size=2**20,
         batch_size=128,
+        begin_learning=10000,
         state_dim=STATE_DIM,
         action_dim=ACTION_DIM,
         device=DEFAULT_DEVICE,
@@ -320,7 +320,7 @@ class PrioritisedReplayBuffer:
         self.buffer_index = 0
         self.full = False
         self.device = device
-        self.sum_tree = SumTree(buffer_size=buffer_size, batch_size=batch_size, device=device)
+        self.sum_tree = SumTree(buffer_size=buffer_size, batch_size=batch_size, begin_learning=begin_learning, device=device)
 
         # Pre-allocate tensors on the specified device
         self.states = torch.zeros((buffer_size, state_dim), device=device)
@@ -361,18 +361,21 @@ class PrioritisedReplayBuffer:
 
     def recalculate_priorities(self, buffer_indices, td_errors):
         """batch update the priorities at the given buffer_indices"""
-        # Must remove duplicate buffer indices before propagating from leaves
-        buffer_indices_no_duplicates = []
-        td_errors_no_duplicates = []
-        seen = set()
-        for i in range(len(buffer_indices)):
-            if buffer_indices[i].item() not in seen:
-                seen.add(buffer_indices[i].item())
-                buffer_indices_no_duplicates.append(buffer_indices[i].item())
-                td_errors_no_duplicates.append(td_errors[i].item())
-        buffer_indices = torch.tensor(buffer_indices_no_duplicates, device=self.device)
-        td_errors = torch.tensor(td_errors_no_duplicates, device=self.device)
-        self.sum_tree.batch_update(buffer_indices, td_errors)
+
+        # get unique buffer_indices + inverse_indices (mapping to new unique buffer_indices)
+        unique_buffer_indices, inverse_indices = torch.unique(buffer_indices, return_inverse=True)
+
+        deduplicated_td_errors = torch.zeros_like(unique_buffer_indices, dtype=torch.float32)
+
+        deduplicated_td_errors.scatter_reduce_(
+            dim=0,
+            index=inverse_indices, # group td_errors by duplicate buffer_indices
+            src=td_errors,
+            reduce="amax", # keep absolute max val from src in each group
+            include_self=False # do not include inital zeros in group
+        )
+
+        self.sum_tree.batch_update(unique_buffer_indices, deduplicated_td_errors)
 
 class GaussianSampler:
     def __init__(self, mean=0.0, sigma=0.2, clip=None, device=DEFAULT_DEVICE):
