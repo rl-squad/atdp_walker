@@ -118,10 +118,8 @@ class SumTree:
         self.values = torch.zeros(2 * buffer_size - 1, device=device)
 
         # buffer-indexed
-        self.max_is_weight_buffer_index = -1
-        self.max_prio_buffer_index = -1
-        # importance sampling weights of each transition buffer-indexed
-        self.is_weights = torch.zeros(buffer_size, device=device)
+        self.max_priority_index = -1
+        self.min_priority_index = 0
 
         self.beta_zero = beta_zero
         self.beta = beta_zero
@@ -136,9 +134,6 @@ class SumTree:
     def leaf_to_buffer(self, leaf):
         """converts leaf to buffer index/indices"""
         return leaf - (self.buffer_size - 1)
-
-    def recalculate_max_is_weight_index(self):
-        self.max_is_weight_buffer_index = torch.argmax(self.is_weights)
 
     def calculate_is_weight(self, leaf_indices):
         """
@@ -170,7 +165,7 @@ class SumTree:
             # traverse to immediate parent nodes
             tree_indices = (tree_indices - 1) // 2
 
-    def batch_update(self, buffer_indices, td_errors):
+    def batch_update(self, buffer_indices, td_errors, buffer_pointer):
         """batch update the (proportial-based) priorities of the selected transitions"""
 
         leaf_indices = self.buffer_to_leaf(buffer_indices)
@@ -178,40 +173,37 @@ class SumTree:
         # update sum tree priorities
         self.batch_propagate(leaf_indices, priorities)
 
-        # calculate importance sampling weights
-        is_weights = self.calculate_is_weight(leaf_indices)
+        # update maximums/minimums local to this batch
 
-        # update to is_weights of this batch, overwrites previous
-        self.is_weights[buffer_indices] = is_weights
+        overwriting_max_priority_index = (self.max_priority_index in buffer_indices)
 
-        # update maximums local to this batch
-
-        # If the sampled buffer indices contained the max priority index,
-        # must recalculate after overwrite to reduce staleness
-        overwriting_max_prio_index = (self.max_prio_buffer_index in buffer_indices)
-
-        if overwriting_max_prio_index:
-            self.max_prio_buffer_index = torch.argmax(self.values[self.buffer_to_leaf(0):])
+        # try to avoid costly search over the whole buffer
+        if overwriting_max_priority_index:
+            self.max_priority_index = torch.argmax(self.values[self.buffer_to_leaf(0):])
         else:
-            max_prio = self.values[self.buffer_to_leaf(self.max_prio_buffer_index)]
+            global_max_priority = self.values[self.buffer_to_leaf(self.max_priority_index)]
 
-            batch_max_prio, batch_max_prio_index = torch.max(priorities, dim=0)
+            batch_max_priority, batch_max_priority_index = torch.max(priorities, dim=0)
 
-            if batch_max_prio > max_prio:
-                self.max_prio_buffer_index = buffer_indices[batch_max_prio_index]
+            if batch_max_priority > global_max_priority:
+                self.max_priority_index = buffer_indices[batch_max_priority_index]
 
-        # If the sampled buffer indices contained the max is_weight index,
-        # must recalculate after overwrite to reduce staleness
-        overwriting_max_is_weight_index = (self.max_is_weight_buffer_index in buffer_indices)
-        
-        if overwriting_max_is_weight_index:
-            self.recalculate_max_is_weight_index()
+        overwriting_min_priority_index = (self.min_priority_index in buffer_indices)
+
+        # try to avoid costly search over the whole buffer
+        if overwriting_min_priority_index:
+            # Must account for the buffer being initialised to zeros
+            self.min_priority_index = torch.argmin(
+                # buffer pointer shows where the circular buffer has been filled to so far
+                self.values[self.buffer_to_leaf(0):self.buffer_to_leaf(buffer_pointer)]
+            )
         else:
-            max_is_weight = self.is_weights[self.max_is_weight_buffer_index]
-            batch_max_is_weight, batch_max_is_weight_index = torch.max(is_weights, dim=0)
-            # slight staleness from not updating all is_weights when sum tree changes
-            if batch_max_is_weight > max_is_weight:
-                self.max_is_weight_buffer_index = buffer_indices[batch_max_is_weight_index]
+            global_min_priority = self.values[self.buffer_to_leaf(self.min_priority_index)]
+
+            batch_min_priority, batch_min_priority_index = torch.min(priorities, dim=0)
+
+            if batch_min_priority < global_min_priority:
+                self.min_priority_index = buffer_indices[batch_min_priority_index]
 
     def propagate(self, tree_index, priority):
         """
@@ -234,50 +226,39 @@ class SumTree:
         leaf_index = self.buffer_to_leaf(buffer_index)
 
         # give new transitions the highest priority
-        if self.max_prio_buffer_index == -1:
+        if self.max_priority_index == -1:
             priority = self.epsilon
-            self.max_prio_buffer_index = buffer_index
+            self.max_priority_index = buffer_index
         else:
-            max_prio_leaf_index = self.buffer_to_leaf(self.max_prio_buffer_index)
+            max_prio_leaf_index = self.buffer_to_leaf(self.max_priority_index)
             priority = self.values[max_prio_leaf_index]
 
         # update sum tree priorities
         self.propagate(leaf_index, priority)
-
-        is_weight = self.calculate_is_weight(leaf_index)
-
-        # store all is_weights
-        self.is_weights[buffer_index] = is_weight
-
-        # Possibly wrapped around the circular buffer and still have the same max is weight index
-        overwriting_max = (buffer_index == self.max_is_weight_buffer_index)
-
-        # keep track of the max importance sampling weight
-        if is_weight > self.is_weights[self.max_is_weight_buffer_index]:
-            self.max_is_weight_buffer_index = buffer_index
-        elif overwriting_max:
-            # Note: the batch_update could put the max_index in front of the buffer index pointer but
-            # this attempts to minimise extra computation
-            self.recalculate_max_is_weight_index()
 
     def get_leaves_from_priorities(self, priorities):
         """returns leaf_indices corresponding to the priorities batch"""
         # all indices start at root node
         tree_indices = torch.zeros_like(priorities, dtype=torch.int64, device=self.device)
         while True:
-            left_children = 2 * tree_indices + 1
-            right_children = left_children + 1
             # check if indices have reached the leaves
             is_leaf = tree_indices >= (self.buffer_size - 1)
             if is_leaf.all():
-                break
-            # compare priorities to left/right child values
+                return tree_indices
+
+            left_children = 2 * tree_indices + 1
+            right_children = left_children + 1
+
             left_values = self.values[left_children]
-            go_right = priorities > left_values
+            right_values = self.values[right_children]
+
+            # added additional explicit (right_values > 0) after receiving leaves with zero priority
+            # possible floating point imprecision calculation when subtracting priorities here or in sum tree propagation
+            go_right = (priorities > left_values) & (right_values > 0)
+
             # update indices and priorities
             tree_indices = torch.where(go_right, right_children, left_children)
             priorities = torch.where(go_right, priorities - left_values, priorities)
-        return tree_indices
 
     def anneal_beta(self, steps=1):
         """increase correction for sampling bias"""
@@ -300,9 +281,17 @@ class SumTree:
         # vectorised root-to-leaf traversal
         leaf_indices = self.get_leaves_from_priorities(sampled_priorities)
         buffer_indices = self.leaf_to_buffer(leaf_indices)
-        # batch-compute weights
-        is_weights = self.is_weights[buffer_indices]
-        normalised_weights = is_weights / self.is_weights[self.max_is_weight_buffer_index]
+        # batch-compute is_weights
+        is_weights = self.calculate_is_weight(leaf_indices)
+        # compute max_is_weight as needed using min priority for maximum freshness
+        # since batch size and the sum of all priorities is the same for all priorities
+        numerator = self.values[0] ** self.beta
+        min_priority = self.values[self.buffer_to_leaf(self.min_priority_index)]
+        denominator = (self.batch_size * min_priority) ** self.beta
+        max_is_weight =  numerator / denominator
+        # each is_weight normalised by max_is_weight
+        normalised_weights = is_weights / max_is_weight
+
         return buffer_indices, normalised_weights
 
 class PrioritisedReplayBuffer:
@@ -317,7 +306,7 @@ class PrioritisedReplayBuffer:
     ):
         self.buffer_size = buffer_size
         self.batch_size = batch_size
-        self.buffer_index = 0
+        self.buffer_pointer = 0
         self.full = False
         self.device = device
         self.sum_tree = SumTree(buffer_size=buffer_size, batch_size=batch_size, begin_learning=begin_learning, device=device)
@@ -336,14 +325,14 @@ class PrioritisedReplayBuffer:
         """
         if state.dim() > 1:
             raise Exception("buffer does not yet support batch append")
-        self.states[self.buffer_index] = state
-        self.actions[self.buffer_index] = action
-        self.rewards[self.buffer_index] = reward
-        self.next_states[self.buffer_index] = next_state
-        self.is_terminal[self.buffer_index] = terminal
-        self.sum_tree.add(self.buffer_index)
-        self.buffer_index = (self.buffer_index + 1) % self.buffer_size
-        if self.buffer_index == 0:
+        self.states[self.buffer_pointer] = state
+        self.actions[self.buffer_pointer] = action
+        self.rewards[self.buffer_pointer] = reward
+        self.next_states[self.buffer_pointer] = next_state
+        self.is_terminal[self.buffer_pointer] = terminal
+        self.sum_tree.add(self.buffer_pointer)
+        self.buffer_pointer = (self.buffer_pointer + 1) % self.buffer_size
+        if self.buffer_pointer == 0:
             self.full = True
 
     def sample_batch(self):
@@ -362,6 +351,8 @@ class PrioritisedReplayBuffer:
     def recalculate_priorities(self, buffer_indices, td_errors):
         """batch update the priorities at the given buffer_indices"""
 
+        # Must remove duplicate buffer indices before propagating from leaves
+
         # get unique buffer_indices + inverse_indices (mapping to new unique buffer_indices)
         unique_buffer_indices, inverse_indices = torch.unique(buffer_indices, return_inverse=True)
 
@@ -370,12 +361,16 @@ class PrioritisedReplayBuffer:
         deduplicated_td_errors.scatter_reduce_(
             dim=0,
             index=inverse_indices, # group td_errors by duplicate buffer_indices
-            src=td_errors,
-            reduce="amax", # keep absolute max val from src in each group
+            src=torch.abs(td_errors),
+            reduce="max", # keep abs max val from src in each group
             include_self=False # do not include inital zeros in group
         )
 
-        self.sum_tree.batch_update(unique_buffer_indices, deduplicated_td_errors)
+        self.sum_tree.batch_update(
+            unique_buffer_indices,
+            deduplicated_td_errors,
+            self.buffer_size if self.full else self.buffer_pointer
+        )
 
 class GaussianSampler:
     def __init__(self, mean=0.0, sigma=0.2, clip=None, device=DEFAULT_DEVICE):
