@@ -8,6 +8,7 @@ from algorithms.common import (
     QNetwork,
     PolicyNetwork,
     ReplayBuffer,
+    PrioritisedReplayBuffer,
     GaussianSampler,
     copy_params,
     polyak_update,
@@ -18,10 +19,8 @@ from algorithms.common import (
 class TD3:
     def __init__(
         self,
-        buffer_size=1000000,
         batch_size=128,
-        start_steps=10000,
-        update_after=1000,
+        begin_learning=10000,
         update_every=50,
         policy_delay=2,
         exploration_noise_params=[0.0, 0.2],
@@ -30,11 +29,13 @@ class TD3:
         q_lr=1e-4,
         policy_lr=1e-4,
         polyak=0.995,
-        device=DEFAULT_DEVICE
+        device=DEFAULT_DEVICE,
+        prioritised_experience_replay=False,
     ):
         e_mu, e_sigma = exploration_noise_params
         s_mu, s_sigma, s_clip = smoothing_noise_params
-        
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
+        self.smoothing_noise = GaussianSampler(mean=s_mu, sigma=s_sigma, clip=(-s_clip, s_clip), device=device)
         self.device = device
         self.q1 = QNetwork().to(device)
         self.q1_target = QNetwork().to(device)
@@ -42,17 +43,26 @@ class TD3:
         self.q2_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = ReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, device=device)
-        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
-        self.smoothing_noise = GaussianSampler(mean=s_mu, sigma=s_sigma, clip=(-s_clip, s_clip), device=device)
-
         self.batch_size = batch_size
-        self.start_steps = start_steps
-        self.update_after = update_after
+        self.begin_learning = begin_learning
         self.update_every = update_every
         self.policy_delay = policy_delay
         self.gamma = gamma
         self.polyak = polyak
+        if prioritised_experience_replay:
+            self.buffer = PrioritisedReplayBuffer(
+                buffer_size=2**20, # Closest power of 2 to 1 million
+                batch_size=batch_size,
+                begin_learning=begin_learning,
+                device=device
+            )
+        else:
+            self.buffer = ReplayBuffer(
+                buffer_size=1000000,
+                batch_size=batch_size,
+                device=device
+            )
+        self.prioritised_experience_replay = prioritised_experience_replay
 
         copy_params(self.q1_target, self.q1)
         copy_params(self.q2_target, self.q2)
@@ -73,31 +83,61 @@ class TD3:
         noise = self.exploration_noise.sample(a.shape)
 
         return torch.clamp(a + noise, min=-1, max=1)
-    
+
+    def calculate_td_error(self, s, a, r, s_n, t):
+        """
+        batch-aware and single-sample td error calculation
+        terminated must be passed as a float32 tensor
+        """
+        with torch.no_grad():
+            a_target = torch.clamp(
+                self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
+                min=-1,
+                max=1
+            )
+            target = r + self.gamma * (1 - t) * torch.min(
+                self.q1_target(s_n, a_target),
+                self.q2_target(s_n, a_target)
+            )
+            q = self.q1(s, a)
+            td_error = target - q
+            return td_error
+
     def update(self, skip_policy_update):
-        s, a, r, s_n, d = self.buffer.sample()
+        s, a, r, s_n, t, w, buffer_indices = self.buffer.sample()
 
         with torch.no_grad():
-            a_target = torch.clamp(self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)), min=-1, max=1)
-            
-            target = r + self.gamma * (1 - d) * torch.min(
+            a_target = torch.clamp(
+                self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
+                min=-1,
+                max=1
+            )
+            target = r + self.gamma * (1 - t) * torch.min(
                 self.q1_target(s_n, a_target),
                 self.q2_target(s_n, a_target)
             )
         
+        # If prioritised, fold normalised importance sampling weights into q-learning updates
+        # If not, multiplies by 1s
+
         q1 = self.q1(s, a)
-        loss1 = self.loss(q1, target)
+        loss1 = self.loss(w * q1, w * target)
 
         self.q1_optimizer.zero_grad()
         loss1.backward()
         self.q1_optimizer.step()
 
         q2 = self.q2(s, a)
-        loss2 = self.loss(q2, target)
+        loss2 = self.loss(w * q2, w * target)
 
         self.q2_optimizer.zero_grad()
         loss2.backward()
         self.q2_optimizer.step()
+
+        if self.prioritised_experience_replay:
+            # Recalculate priorities of sampled transitions only
+            td_errors = self.calculate_td_error(s, a, r, s_n, t)
+            self.buffer.recalculate_priorities(buffer_indices, td_errors.squeeze())
 
         if skip_policy_update:
             return
@@ -122,7 +162,7 @@ class TD3:
         s, _ = env.reset()
 
         while not env.done():
-            if steps < self.start_steps:
+            if steps < self.begin_learning:
                 a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -137,9 +177,14 @@ class TD3:
 
             steps += 1
 
-            if (steps > self.update_after) and (steps % self.update_every == 0):
-                for i in range(self.update_every):
-                    self.update(skip_policy_update=(i % self.policy_delay != 0))
+            if steps > self.begin_learning:
+
+                # update networks
+                self.update(skip_policy_update=(steps % self.policy_delay != 0))
+
+                if self.prioritised_experience_replay:
+                    # beta schedule for annealling bias of PER sampling after updates
+                    self.buffer.sum_tree.anneal_beta()
     
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
         if self.update_every < num_envs:
@@ -151,7 +196,7 @@ class TD3:
         s, _ = env.reset()
         
         while not env.done():
-            if env.get_current_step() < self.start_steps:
+            if env.get_current_step() < self.begin_learning:
                 a = 2 * torch.rand((num_envs, ACTION_DIM), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -169,9 +214,15 @@ class TD3:
             
             s = s_n
 
-            if env.get_current_step() > self.update_after and env.get_current_step() % update_every == 0:
-                for i in range(update_every):
+            if env.get_current_step() > self.begin_learning:
+
+                # update networks
+                for i in range(num_envs):
                     self.update(skip_policy_update=(i % self.policy_delay != 0))
-    
+                
+                if self.prioritised_experience_replay:
+                    # beta schedule for annealling bias of PER sampling after updates
+                    self.buffer.sum_tree.anneal_beta(steps=num_envs)
+
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
