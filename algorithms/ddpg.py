@@ -8,6 +8,7 @@ from algorithms.common import (
     QNetwork,
     PolicyNetwork,
     ReplayBuffer,
+    PrioritisedReplayBuffer,
     GaussianSampler,
     copy_params,
     polyak_update,
@@ -18,17 +19,16 @@ from algorithms.common import (
 class DDPG:
     def __init__(
         self,
-        buffer_size=1000000,
         batch_size=128,
-        start_steps=10000,
-        update_after=1000,
+        begin_learning=10000,
         update_every=50,
         exploration_noise_params=[0, 0.2],
         gamma = 0.99,
         q_lr=1e-4,
         policy_lr=1e-4,
         polyak=0.995,
-        device=DEFAULT_DEVICE
+        device=DEFAULT_DEVICE,
+        prioritised_experience_replay=False,
     ):
         e_mu, e_sigma = exploration_noise_params
         
@@ -37,15 +37,26 @@ class DDPG:
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = ReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, device=device)
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
-        
         self.batch_size = batch_size
-        self.start_steps = start_steps
-        self.update_after = update_after
+        self.begin_learning = begin_learning
         self.update_every = update_every
         self.gamma = gamma
         self.polyak = polyak
+        if prioritised_experience_replay:
+            self.buffer = PrioritisedReplayBuffer(
+                buffer_size=2**20, # Closest power of 2 to 1 million
+                batch_size=batch_size,
+                begin_learning=begin_learning,
+                device=device
+            )
+        else:
+            self.buffer = ReplayBuffer(
+                buffer_size=1000000,
+                batch_size=batch_size,
+                device=device
+            )
+        self.prioritised_experience_replay = prioritised_experience_replay
 
         # initially set parameters of the target networks 
         # to those from the actual networks
@@ -70,19 +81,32 @@ class DDPG:
         noise = self.exploration_noise.sample(a.shape)
 
         return torch.clamp(a + noise, min=-1, max=1)
-    
+
+    def calculate_td_error(self, s, a, r, s_n, t):
+        """
+        batch-aware and single-sample td error calculation
+        terminated must be passed as a float32 tensor
+        """
+        with torch.no_grad():
+            target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
+            q = self.q(s, a)
+            td_error = target - q
+            return td_error
+
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, d = self.buffer.sample()
+        s, a, r, s_n, t, w, buffer_indices = self.buffer.sample()
 
         with torch.no_grad():
-            target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))
+            target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
 
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
         q = self.q(s, a)
-        loss = self.loss(q, target)
+        # If prioritised, fold normalised importance sampling weights into q-learning update
+        # If not, multiplies by 1s
+        loss = self.loss(w * q, w * target)
 
         self.q_optimizer.zero_grad()
         loss.backward()
@@ -100,6 +124,10 @@ class DDPG:
         polyak_update(self.q_target, self.q, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
 
+        if self.prioritised_experience_replay:
+            # After network updates, recalculate priorities of sampled transitions only
+            td_errors = self.calculate_td_error(s, a, r, s_n, t)
+            self.buffer.recalculate_priorities(buffer_indices, td_errors.squeeze())
 
     def train(self, num_episodes=5000, benchmark=False):
         env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
@@ -108,7 +136,7 @@ class DDPG:
         s, _ = env.reset()
 
         while not env.done():
-            if steps < self.start_steps:
+            if steps < self.begin_learning:
                 a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -123,9 +151,14 @@ class DDPG:
             
             steps += 1
 
-            if (steps > self.update_after) and (steps % self.update_every == 0):
-                for _ in range(self.update_every):
-                    self.update()
+            if steps > self.begin_learning:
+
+                # update networks
+                self.update()
+
+                if self.prioritised_experience_replay:
+                    # beta schedule for annealling bias of PER sampling after updates
+                    self.buffer.sum_tree.anneal_beta()
     
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
         if self.update_every < num_envs:
@@ -137,7 +170,7 @@ class DDPG:
         s, _ = env.reset()
         
         while not env.done():
-            if env.get_current_step() < self.start_steps:
+            if env.get_current_step() < self.begin_learning:
                 a = 2 * torch.rand((num_envs, ACTION_DIM), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -155,9 +188,15 @@ class DDPG:
             
             s = s_n
 
-            if env.get_current_step() > self.update_after and env.get_current_step() % update_every == 0:
-                for _ in range(update_every):
+            if env.get_current_step() > self.begin_learning:
+
+                # update networks
+                for _ in range(num_envs):
                     self.update()
+                
+                if self.prioritised_experience_replay:
+                    # beta schedule for annealling bias of PER sampling after updates
+                    self.buffer.sum_tree.anneal_beta(steps=num_envs)
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))

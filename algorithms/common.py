@@ -73,6 +73,9 @@ class ReplayBuffer:
         self.next_states = torch.zeros((buffer_size, state_dim), device=device)
         self.dones = torch.zeros((buffer_size, 1), device=device)
 
+        # weights returned to mimic PER buffer sampling
+        self.weights = torch.ones(batch_size, 1, device=device)
+
     def append(self, state, action, reward, next_state, done):
         """Store a transition in pre-allocated tensor memory"""
         self.states[self.index] = state
@@ -97,6 +100,8 @@ class ReplayBuffer:
             self.rewards[indices],
             self.next_states[indices],
             self.dones[indices],
+            self.weights, # weights are 1s so that this method is compatible with PER sampling
+            None # buffer_indices not used in normal replay buffer
         )
 
 class SumTree:
@@ -335,7 +340,7 @@ class PrioritisedReplayBuffer:
         if self.buffer_pointer == 0:
             self.full = True
 
-    def sample_batch(self):
+    def sample(self):
         """batched prioritised experience sampling"""
         buffer_indices, normalised_is_weights = self.sum_tree.sample_batch()
         return (

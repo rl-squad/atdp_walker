@@ -36,7 +36,12 @@ class DDPGPER:
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = PrioritisedReplayBuffer(buffer_size=buffer_size, batch_size=batch_size, begin_learning=begin_learning, device=device)
+        self.buffer = PrioritisedReplayBuffer(
+            buffer_size=buffer_size,
+            batch_size=batch_size,
+            begin_learning=begin_learning,
+            device=device
+        )
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
 
         self.batch_size = batch_size
@@ -72,7 +77,7 @@ class DDPGPER:
     def calculate_td_error(self, s, a, r, s_n, t):
         """
         batch-aware and single-sample td error calculation
-        terminated must be passed as a float32
+        terminated must be passed as a float32 tensor
         """
         with torch.no_grad():
             target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
@@ -83,7 +88,7 @@ class DDPGPER:
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, t, w, buffer_indices = self.buffer.sample_batch()
+        s, a, r, s_n, t, w, buffer_indices = self.buffer.sample()
 
         with torch.no_grad():
             target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
@@ -137,10 +142,11 @@ class DDPGPER:
             
             steps += 1
 
-            if (steps > self.begin_learning) and (steps % self.update_every == 0):
+            if steps > self.begin_learning:
                 # update networks
-                for _ in range(self.update_every):
-                    self.update()
+                self.update()
+                # beta schedule for annealling bias of PER sampling after updates
+                self.buffer.sum_tree.anneal_beta()
 
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
         if self.update_every < num_envs:
