@@ -5,7 +5,7 @@ from algorithms.common import PolicyNetwork, DEFAULT_DEVICE
 
 # Load the trained policy from your ddpg checkpoint.
 policy = PolicyNetwork().to(DEFAULT_DEVICE)
-policy.load_state_dict(torch.load("Calum_Testing/ddpg_batch.pth", map_location=DEFAULT_DEVICE))
+policy.load_state_dict(torch.load("SHAP/ddpg_batch.pth", map_location=DEFAULT_DEVICE))
 policy.eval()
 
 # Initialize the environment.
