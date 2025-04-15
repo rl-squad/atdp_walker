@@ -33,16 +33,22 @@ def plot_performance():
     
     # Plot all 1D arrays on same graph
     for arr, filename in zip(arrays, filenames):
-        timestep = np.array((i + 1) * 10 for i, _ in enumerate(arr))
+        timestep = np.array([(i + 1) for i in range(len(arr))])
         mean = np.array([obs[0] for obs in arr])
         sd = np.array([obs[1] for obs in arr])
 
         upper = mean + sd
         lower = mean - sd
 
-        plt.plot(mean, label=filename)
-        # plt.plot(upper, label="upper")
-        # plt.plot(lower, label="lower")
+        plt.plot(timestep, mean, label=filename)
+        plt.fill_between(
+            timestep,
+            lower,
+            upper,
+            alpha=0.15,
+            linewidth=0,
+            color=plt.gca().lines[-1].get_color()
+        )
     
     # Add plot decorations
     plt.title("Performance")

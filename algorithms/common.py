@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 # declaring the state and action dimensions as constants
 STATE_DIM = 17
@@ -323,6 +324,9 @@ class PrioritisedReplayBuffer:
         self.next_states = torch.zeros((buffer_size, state_dim), device=device)
         self.is_terminal = torch.zeros((buffer_size, 1), device=device)
 
+        # stores relevant priorities metrics for debugging
+        self.priorities_log = []
+
     def append(self, state, action, reward, next_state, terminal):
         """
         store transition in buffer and corresponding priority in sum tree,
@@ -376,6 +380,31 @@ class PrioritisedReplayBuffer:
             deduplicated_td_errors,
             self.buffer_size if self.full else self.buffer_pointer
         )
+
+    def log_priorities(self):
+        """logs various priority metrics to diagnose/debug degeneration"""
+        s = self.sum_tree
+        p = self.buffer_size if self.full else self.buffer_pointer
+        priorities = s.values[s.buffer_to_leaf(0):p]
+        numerator = s.values[0] ** s.beta
+        min_priority = s.values[s.buffer_to_leaf(s.min_priority_index)]
+        max_priority = s.values[s.buffer_to_leaf(s.max_priority_index)]
+        denominator = (self.batch_size * min_priority) ** s.beta
+        max_is_weight =  numerator / denominator
+        self.priorities_log.append((
+            # These are directly used in calculations
+            max_priority.detach().cpu().numpy(),
+            min_priority.detach().cpu().numpy(),
+            max_is_weight.detach().cpu().numpy(),
+            # Check whether stored max/mins are equal to actual
+            torch.max(priorities).detach().cpu().numpy(),
+            torch.min(priorities).detach().cpu().numpy(),
+            torch.mean(priorities).detach().cpu().numpy(),
+        ))
+
+    def write_priorities_log(self, filename):
+        """write logged priorities to file"""
+        np.save(f"out/{filename}_priorities.npy", self.priorities_log)
 
 class GaussianSampler:
     def __init__(self, mean=0.0, sigma=0.2, clip=None, device=DEFAULT_DEVICE):

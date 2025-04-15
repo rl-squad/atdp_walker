@@ -29,6 +29,7 @@ class DDPG:
         polyak=0.995,
         device=DEFAULT_DEVICE,
         prioritised_experience_replay=False,
+        debug_per=False,
     ):
         e_mu, e_sigma = exploration_noise_params
         
@@ -57,6 +58,8 @@ class DDPG:
                 device=device
             )
         self.prioritised_experience_replay = prioritised_experience_replay
+        self.debug_per = debug_per # for debugging the priorities buffer
+        self.log_every = 10000 # same as benchmark_every for comparison
 
         # initially set parameters of the target networks 
         # to those from the actual networks
@@ -165,7 +168,8 @@ class DDPG:
             raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
         env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
-        update_every = max((self.update_every // num_envs) * num_envs, num_envs)  
+        update_every = max((self.update_every // num_envs) * num_envs, num_envs)
+        log_every = max((self.log_every // num_envs) * num_envs, num_envs)
 
         s, _ = env.reset()
         
@@ -197,6 +201,14 @@ class DDPG:
                 if self.prioritised_experience_replay:
                     # beta schedule for annealling bias of PER sampling after updates
                     self.buffer.sum_tree.anneal_beta(steps=num_envs)
+
+            if self.prioritised_experience_replay and self.debug_per:
+
+                if (env.get_current_step() >= self.begin_learning) and (env.get_current_step() % log_every == 0):
+                    self.buffer.log_priorities()
+
+                if env.done():
+                    self.buffer.write_priorities_log(env.file_name)
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
