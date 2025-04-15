@@ -385,7 +385,7 @@ class PrioritisedReplayBuffer:
         """logs various priority metrics to diagnose/debug degeneration"""
         s = self.sum_tree
         p = self.buffer_size if self.full else self.buffer_pointer
-        priorities = s.values[s.buffer_to_leaf(0):p]
+        priorities = s.values[s.buffer_to_leaf(0):s.buffer_to_leaf(p)]
         numerator = s.values[0] ** s.beta
         min_priority = s.values[s.buffer_to_leaf(s.min_priority_index)]
         max_priority = s.values[s.buffer_to_leaf(s.max_priority_index)]
