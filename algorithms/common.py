@@ -150,7 +150,7 @@ class SumTree:
         calculates the importance sampling weight used to correct for sampling bias,
         """
         transition_probabilities = self.values[leaf_indices] / self.values[0]
-        return (self.batch_size * transition_probabilities) ** (-1 * self.beta)
+        return (self.current_size * transition_probabilities) ** (-1 * self.beta)
 
     def batch_propagate(self, tree_indices, priorities):
         """
