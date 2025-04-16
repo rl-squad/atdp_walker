@@ -133,6 +133,9 @@ class SumTree:
         self.beta_start = begin_learning # learning updates/non-random policy starts at 10,000 steps
         self.beta_current_steps = self.beta_start
 
+        # count of how many transitions are being sampled from
+        self.current_size = 0
+
     def buffer_to_leaf(self, buffer):
         """converts buffer to leaf index/indices"""
         return buffer + (self.buffer_size - 1)
@@ -233,7 +236,7 @@ class SumTree:
 
         # give new transitions the highest priority
         if self.max_priority_index == -1:
-            priority = self.epsilon
+            priority = 1
             self.max_priority_index = buffer_index
         else:
             max_prio_leaf_index = self.buffer_to_leaf(self.max_priority_index)
@@ -241,6 +244,9 @@ class SumTree:
 
         # update sum tree priorities
         self.propagate(leaf_index, priority)
+
+        if self.current_size < self.buffer_size:
+            self.current_size += 1
 
     def get_leaves_from_priorities(self, priorities):
         """returns leaf_indices corresponding to the priorities batch"""
@@ -293,7 +299,7 @@ class SumTree:
         # since batch size and the sum of all priorities is the same for all priorities
         numerator = self.values[0] ** self.beta
         min_priority = self.values[self.buffer_to_leaf(self.min_priority_index)]
-        denominator = (self.batch_size * min_priority) ** self.beta
+        denominator = (self.current_size * min_priority) ** self.beta
         max_is_weight =  numerator / denominator
         # each is_weight normalised by max_is_weight
         normalised_weights = is_weights / max_is_weight
@@ -357,6 +363,9 @@ class PrioritisedReplayBuffer:
             buffer_indices
         )
 
+    def current_size(self):
+        return self.buffer_size if self.full else self.buffer_pointer
+
     def recalculate_priorities(self, buffer_indices, td_errors):
         """batch update the priorities at the given buffer_indices"""
 
@@ -378,18 +387,18 @@ class PrioritisedReplayBuffer:
         self.sum_tree.batch_update(
             unique_buffer_indices,
             deduplicated_td_errors,
-            self.buffer_size if self.full else self.buffer_pointer
+            self.current_size()
         )
 
     def log_priorities(self):
         """logs various priority metrics to diagnose/debug degeneration"""
         s = self.sum_tree
-        p = self.buffer_size if self.full else self.buffer_pointer
-        priorities = s.values[s.buffer_to_leaf(0):s.buffer_to_leaf(p)]
+        size = self.current_size()
+        priorities = s.values[s.buffer_to_leaf(0):s.buffer_to_leaf(size)]
         numerator = s.values[0] ** s.beta
         min_priority = s.values[s.buffer_to_leaf(s.min_priority_index)]
         max_priority = s.values[s.buffer_to_leaf(s.max_priority_index)]
-        denominator = (self.batch_size * min_priority) ** s.beta
+        denominator = (size * min_priority) ** s.beta
         max_is_weight =  numerator / denominator
         self.priorities_log.append((
             # These are directly used in calculations
