@@ -288,8 +288,11 @@ class SumTree:
         returning buffer_indices of transitions sampled and associated normalised_weights
         """
         sum_all_priorities = self.values[0] # root node
-        # possible to change to stratified instead of uniform sampling (appendix B.2.1 PER)
-        sampled_priorities = torch.rand(self.batch_size, device=self.device) * sum_all_priorities
+        # Stratified sampling of proportional priorities (as described by Schaul et al appendix B.2.1)
+        segment_size = sum_all_priorities / self.batch_size
+        sampled_priorities = torch.arange(0, self.batch_size, device=self.device) * segment_size
+        random_offset = torch.rand_like(sampled_priorities, device=self.device) * segment_size
+        sampled_priorities += random_offset
         # vectorised root-to-leaf traversal
         leaf_indices = self.get_leaves_from_priorities(sampled_priorities)
         buffer_indices = self.leaf_to_buffer(leaf_indices)
