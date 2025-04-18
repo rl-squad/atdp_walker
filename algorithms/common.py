@@ -144,13 +144,24 @@ class SumTree:
         """converts leaf to buffer index/indices"""
         return leaf - (self.buffer_size - 1)
 
-    def calculate_is_weight(self, leaf_indices):
+    def calculate_normalised_is_weights(self, leaf_indices):
         """
-        batch-aware and single-sample is_weight calculation,
-        calculates the importance sampling weight used to correct for sampling bias,
+        calculates importance sampling weights used to correct for sampling bias,
+        normalised to scale the updates downwards only
         """
         transition_probabilities = self.values[leaf_indices] / self.values[0]
-        return (self.current_size * transition_probabilities) ** (-1 * self.beta)
+        is_weights = (self.current_size * transition_probabilities) ** (-1 * self.beta)
+
+        # compute max_is_weight as needed using min priority for maximum freshness
+        # since batch size and the sum of all priorities is the same for all priorities
+        min_priority = self.values[self.buffer_to_leaf(self.min_priority_index)]
+        min_probability = min_priority / self.values[0]
+        max_is_weight = (self.current_size * min_probability) ** (-1 * self.beta)
+
+        # each is_weight normalised by max_is_weight
+        normalised_is_weights = is_weights / max_is_weight
+
+        return normalised_is_weights
 
     def batch_propagate(self, tree_indices, priorities):
         """
@@ -287,27 +298,22 @@ class SumTree:
         batched sampling according to priorities in the sum tree
         returning buffer_indices of transitions sampled and associated normalised_weights
         """
+        
         sum_all_priorities = self.values[0] # root node
+
         # Stratified sampling of proportional priorities (as described by Schaul et al appendix B.2.1)
         segment_size = sum_all_priorities / self.batch_size
         sampled_priorities = torch.arange(0, self.batch_size, device=self.device) * segment_size
         random_offset = torch.rand_like(sampled_priorities, device=self.device) * segment_size
         sampled_priorities += random_offset
+
         # vectorised root-to-leaf traversal
         leaf_indices = self.get_leaves_from_priorities(sampled_priorities)
         buffer_indices = self.leaf_to_buffer(leaf_indices)
-        # batch-compute is_weights
-        is_weights = self.calculate_is_weight(leaf_indices)
-        # compute max_is_weight as needed using min priority for maximum freshness
-        # since batch size and the sum of all priorities is the same for all priorities
-        numerator = self.values[0] ** self.beta
-        min_priority = self.values[self.buffer_to_leaf(self.min_priority_index)]
-        denominator = (self.current_size * min_priority) ** self.beta
-        max_is_weight =  numerator / denominator
-        # each is_weight normalised by max_is_weight
-        normalised_weights = is_weights / max_is_weight
 
-        return buffer_indices, normalised_weights
+        # batch-compute is_weights
+        normalised_is_weights = self.calculate_normalised_is_weights(leaf_indices)
+        return buffer_indices, normalised_is_weights
 
 class PrioritisedReplayBuffer:
     def __init__(
