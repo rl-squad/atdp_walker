@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from common import ACTION_DIM, STATE_DIM
+from algorithms.common import ACTION_DIM, STATE_DIM
 
 # this is the policy network over the state space S
 # modelled as a neural network with 2 hidden layers.

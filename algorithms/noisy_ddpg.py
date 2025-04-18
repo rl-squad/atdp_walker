@@ -16,7 +16,7 @@ from algorithms.common import (
 
 from algorithms.noisy_net import NoisyPolicyNetwork
 
-class DDPG:
+class NoisyDDPG:
     def __init__(
         self,
         buffer_size=1000000,
@@ -131,7 +131,7 @@ class DDPG:
         if self.update_every < num_envs:
             raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
-        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
+        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, use_noisy_policy=True, benchmark=benchmark, device=self.device)
         update_every = max((self.update_every // num_envs) * num_envs, num_envs)  
 
         s, _ = env.reset()
