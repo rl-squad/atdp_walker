@@ -418,6 +418,7 @@ class PrioritisedReplayBuffer:
             torch.max(priorities).detach().cpu().numpy(),
             torch.min(priorities).detach().cpu().numpy(),
             torch.mean(priorities).detach().cpu().numpy(),
+            s.beta
         ))
 
     def write_priorities_log(self, filename):

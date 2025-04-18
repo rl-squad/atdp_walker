@@ -107,9 +107,11 @@ class DDPG:
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
         q = self.q(s, a)
+
         # If prioritised, fold normalised importance sampling weights into q-learning update
         # If not, multiplies by 1s
-        loss = self.loss(w * q, w * target)
+        td_error = target - q
+        loss = (w * td_error.pow(2)).mean()
 
         self.q_optimizer.zero_grad()
         loss.backward()
