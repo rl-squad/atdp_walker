@@ -57,6 +57,7 @@ class DDPG:
                 batch_size=batch_size,
                 device=device
             )
+        # PER properties
         self.prioritised_experience_replay = prioritised_experience_replay
         self.debug_per = debug_per # for debugging the priorities buffer
         self.log_every = 10000 # same as benchmark_every for comparison
@@ -71,7 +72,7 @@ class DDPG:
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=policy_lr)
 
         # define the loss function
-        self.loss = nn.MSELoss()
+        self.loss = nn.HuberLoss(reduction='none')
     
     # returns the policy action at state s
     def policy_action(self, s):
@@ -110,8 +111,7 @@ class DDPG:
 
         # If prioritised, fold normalised importance sampling weights into q-learning update
         # If not, multiplies by 1s
-        td_error = target - q
-        loss = (w * td_error.pow(2)).mean()
+        loss = (w * self.loss(q, target)).mean()
 
         self.q_optimizer.zero_grad()
         loss.backward()

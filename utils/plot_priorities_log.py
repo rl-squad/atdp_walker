@@ -13,7 +13,7 @@ def plot_priority_stats():
         return
     
     # Create figure with 4 subplots
-    _, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(4, 1, figsize=(6, 7))
+    _, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(6, 7))
 
     # Plot each file's data
     for file in files:
@@ -41,9 +41,9 @@ def plot_priority_stats():
         ax2.plot(steps, stored_min, '--', label=f'{base_name}_stored_min')
         ax2.plot(steps, actual_min, '-', label=f'{base_name}_actual_min')
         
-        ax3.plot(steps, max_is_weight, label=f'{base_name}_max_is_weight')
+        ax3.plot(steps, actual_mean, label=f'{base_name}_actual_mean')
 
-        ax4.plot(steps, actual_mean, label=f'{base_name}_actual_mean')
+        ax4.plot(steps, max_is_weight, label=f'{base_name}_max_is_weight')
 
         ax5.plot(steps, beta, label=f'{base_name}_beta')
     
@@ -56,11 +56,11 @@ def plot_priority_stats():
     ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax2.grid(True, alpha=0.3)
     
-    ax3.set_ylabel('IS Weight Value')
+    ax3.set_ylabel('Priority Value')
     ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax3.grid(True, alpha=0.3)
 
-    ax4.set_ylabel('Priority Value')
+    ax4.set_ylabel('IS Weight Value')
     ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax4.grid(True, alpha=0.3)
 
