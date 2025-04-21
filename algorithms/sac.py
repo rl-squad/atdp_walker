@@ -13,31 +13,45 @@ from algorithms.common import (
     STATE_DIM
 )
 
-
+# Stochastic policy network that outputs Gaussian distribution (mean and std)
 class StochasticPolicyNetwork(nn.Module):
     def __init__(self, hidden_sizes=[256, 256]):
         super().__init__()
+
+        # First fully-connected (dense) layer: input is state vector
         self.fc1 = nn.Linear(STATE_DIM, hidden_sizes[0])
+
+        # Second hidden layer
         self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
+
+        # Final output layers: mean and log standard deviation of action distribution
         self.mu_layer = nn.Linear(hidden_sizes[1], ACTION_DIM)
         self.log_std_layer = nn.Linear(hidden_sizes[1], ACTION_DIM)
 
     def forward(self, state):
+        # Apply ReLU activation to hidden layers
         x = torch.relu(self.fc1(state))
         x = torch.relu(self.fc2(x))
+
+        # Output mean of the Gaussian
         mu = self.mu_layer(x)
+
+        # Output log standard deviation, then exponentiate to get std
         log_std = self.log_std_layer(x)
-        log_std = torch.clamp(log_std, -20, 2)
+        log_std = torch.clamp(log_std, -20, 2)  # constrain log_std range
         std = torch.exp(log_std)
+
         return mu, std
 
     def sample(self, state):
+        # Sample actions from squashed Gaussian using reparameterization trick
         mu, std = self.forward(state)
         normal = torch.distributions.Normal(mu, std)
-        z = normal.rsample()  # reparameterization trick
-        action = torch.tanh(z)
+        z = normal.rsample()  # allows gradients to flow
 
-        # log_prob correction for tanh
+        action = torch.tanh(z)  # squash action to [-1, 1] range
+
+        # Correct the log probability due to tanh squashing
         log_prob = normal.log_prob(z)
         log_prob -= torch.log(1 - action.pow(2) + 1e-6)
         log_prob = log_prob.sum(dim=-1, keepdim=True)
@@ -45,6 +59,7 @@ class StochasticPolicyNetwork(nn.Module):
         return action, log_prob
 
     def mean_action(self, state):
+        # Deterministic action used for evaluation (no sampling)
         mu, _ = self.forward(state)
         return torch.tanh(mu)
 
@@ -65,24 +80,28 @@ class SAC:
     ):
         self.device = device
 
-        # Networks
+        # Q networks and targets (Q1, Q2 are twin critics)
         self.q1 = QNetwork().to(device)
         self.q2 = QNetwork().to(device)
         self.q1_target = QNetwork().to(device)
         self.q2_target = QNetwork().to(device)
+
+        # Policy network
         self.policy = StochasticPolicyNetwork().to(device)
 
-        # Copy initial weights
+        # Initialize target networks to match original Q networks
         copy_params(self.q1_target, self.q1)
         copy_params(self.q2_target, self.q2)
 
-        # Optimizers
+        # Optimizers for Q and policy networks
         self.q1_optimizer = optim.Adam(self.q1.parameters(), lr=lr)
         self.q2_optimizer = optim.Adam(self.q2.parameters(), lr=lr)
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=lr)
 
+        # Experience replay buffer
         self.buffer = ReplayBuffer(buffer_size, device=device)
 
+        # Hyperparameters
         self.batch_size = batch_size
         self.start_steps = start_steps
         self.update_after = update_after
@@ -90,78 +109,99 @@ class SAC:
         self.gamma = gamma
         self.polyak = polyak
         self.alpha = alpha
+
+        # Mean Squared Error loss for Q-value regression
         self.loss_fn = nn.MSELoss()
 
     def update(self):
+        # Sample batch from replay buffer
         s, a, r, s_n, d = self.buffer.sample(self.batch_size)
 
         with torch.no_grad():
+            # Sample next action and log prob from policy
             a_n, logp_a_n = self.policy.sample(s_n)
+
+            # Use clipped double Q trick
             q1_target_val = self.q1_target(s_n, a_n)
             q2_target_val = self.q2_target(s_n, a_n)
             q_target_min = torch.min(q1_target_val, q2_target_val)
+
+            # Compute entropy-augmented Q target
             target = r + self.gamma * (1 - d) * (q_target_min - self.alpha * logp_a_n)
 
+        # Compute current Q estimates
         q1 = self.q1(s, a)
         q2 = self.q2(s, a)
 
+        # Compute losses
         q1_loss = self.loss_fn(q1, target)
         q2_loss = self.loss_fn(q2, target)
 
+        # Update Q1
         self.q1_optimizer.zero_grad()
         q1_loss.backward()
         self.q1_optimizer.step()
 
+        # Update Q2
         self.q2_optimizer.zero_grad()
         q2_loss.backward()
         self.q2_optimizer.step()
 
-        # Update policy
+        # Update policy network
         a_sampled, logp = self.policy.sample(s)
         q1_pi = self.q1(s, a_sampled)
         q2_pi = self.q2(s, a_sampled)
         min_q_pi = torch.min(q1_pi, q2_pi)
 
+        # Policy loss encourages high Q and high entropy
         policy_loss = (self.alpha * logp - min_q_pi).mean()
 
         self.policy_optimizer.zero_grad()
         policy_loss.backward()
         self.policy_optimizer.step()
 
-        # Polyak averaging
+        # Update target Q-networks using Polyak averaging
         polyak_update(self.q1_target, self.q1, self.polyak)
         polyak_update(self.q2_target, self.q2, self.polyak)
 
     def train(self, num_episodes=5000, benchmark=False):
+        # Create the gym environment wrapper
         env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
 
         steps = 0
         s, _ = env.reset()
 
         while not env.done():
+            # Initial exploration with random actions
             if steps < self.start_steps:
                 a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 with torch.no_grad():
                     a, _ = self.policy.sample(s)
 
+            # Interact with environment
             s_n, r, terminated, truncated, _ = env.step(a)
             d = terminated or truncated
 
+            # Store transition in replay buffer
             self.buffer.append(s, a, r, s_n, d.to(torch.float32))
             s = s_n
 
+            # Reset if episode ends
             if d:
                 s, _ = env.reset()
 
             steps += 1
 
+            # Update networks periodically
             if steps > self.update_after and steps % self.update_every == 0:
                 for _ in range(self.update_every):
                     self.update()
 
     def save_policy(self, path):
+        # Save trained policy to file
         torch.save(self.policy.state_dict(), path)
 
     def load_policy(self, path):
+        # Load policy from file
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
