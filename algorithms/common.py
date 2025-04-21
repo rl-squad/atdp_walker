@@ -185,7 +185,7 @@ class SumTree:
             # traverse to immediate parent nodes
             tree_indices = (tree_indices - 1) // 2
 
-    def batch_update(self, buffer_indices, td_errors, buffer_pointer):
+    def batch_update(self, buffer_indices, td_errors):
         """batch update the (proportial-based) priorities of the selected transitions"""
 
         leaf_indices = self.buffer_to_leaf(buffer_indices)
@@ -199,9 +199,14 @@ class SumTree:
 
         # try to avoid costly search over the whole buffer
         if overwriting_max_priority_index:
-            self.max_priority_index = torch.argmax(self.values[self.buffer_to_leaf(0):])
+            start = self.buffer_to_leaf(0)
+            # current_size shows where the circular buffer has been filled to so far
+            end = self.buffer_to_leaf(self.current_size)
+            # max_priority index is buffer-indexed, each buffer index corresponds to a leaf of the tree
+            self.max_priority_index = torch.argmax(self.values[start:end])
         else:
-            global_max_priority = self.values[self.buffer_to_leaf(self.max_priority_index)]
+            max_prio_leaf_index = self.buffer_to_leaf(self.max_priority_index)
+            global_max_priority = self.values[max_prio_leaf_index]
 
             batch_max_priority, batch_max_priority_index = torch.max(priorities, dim=0)
 
@@ -210,15 +215,14 @@ class SumTree:
 
         overwriting_min_priority_index = (self.min_priority_index in buffer_indices)
 
-        # try to avoid costly search over the whole buffer
+        # same as max for min
         if overwriting_min_priority_index:
-            # Must account for the buffer being initialised to zeros
-            self.min_priority_index = torch.argmin(
-                # buffer pointer shows where the circular buffer has been filled to so far
-                self.values[self.buffer_to_leaf(0):self.buffer_to_leaf(buffer_pointer)]
-            )
+            start = self.buffer_to_leaf(0)
+            end = self.buffer_to_leaf(self.current_size)
+            self.min_priority_index = torch.argmin(self.values[start:end])
         else:
-            global_min_priority = self.values[self.buffer_to_leaf(self.min_priority_index)]
+            min_prio_leaf_index = self.buffer_to_leaf(self.min_priority_index)
+            global_min_priority = self.values[min_prio_leaf_index]
 
             batch_min_priority, batch_min_priority_index = torch.min(priorities, dim=0)
 
@@ -368,7 +372,8 @@ class PrioritisedReplayBuffer:
             self.rewards[buffer_indices],
             self.next_states[buffer_indices],
             self.is_terminal[buffer_indices],
-            normalised_is_weights,
+            # must be size (batch_size, 1) for intended element-wise multiplication
+            normalised_is_weights.unsqueeze(1),
             buffer_indices
         )
 
@@ -395,8 +400,7 @@ class PrioritisedReplayBuffer:
 
         self.sum_tree.batch_update(
             unique_buffer_indices,
-            deduplicated_td_errors,
-            self.current_size()
+            deduplicated_td_errors
         )
 
     def log_priorities(self):
@@ -404,11 +408,10 @@ class PrioritisedReplayBuffer:
         s = self.sum_tree
         size = self.current_size()
         priorities = s.values[s.buffer_to_leaf(0):s.buffer_to_leaf(size)]
-        numerator = s.values[0] ** s.beta
         min_priority = s.values[s.buffer_to_leaf(s.min_priority_index)]
         max_priority = s.values[s.buffer_to_leaf(s.max_priority_index)]
-        denominator = (size * min_priority) ** s.beta
-        max_is_weight =  numerator / denominator
+        min_probability = min_priority / s.values[0]
+        max_is_weight = (size * min_probability) ** (-1 * s.beta)
         self.priorities_log.append((
             # These are directly used in calculations
             max_priority.detach().cpu().numpy(),
