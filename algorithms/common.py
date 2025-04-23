@@ -74,9 +74,6 @@ class ReplayBuffer:
         self.next_states = torch.zeros((buffer_size, state_dim), device=device)
         self.dones = torch.zeros((buffer_size, 1), device=device)
 
-        # weights returned to mimic PER buffer sampling
-        self.weights = torch.ones(batch_size, 1, device=device)
-
     def append(self, state, action, reward, next_state, done):
         """Store a transition in pre-allocated tensor memory"""
         self.states[self.index] = state
@@ -101,8 +98,6 @@ class ReplayBuffer:
             self.rewards[indices],
             self.next_states[indices],
             self.dones[indices],
-            self.weights, # weights are 1s so that this method is compatible with PER sampling
-            None # buffer_indices not used in normal replay buffer
         )
 
 class SumTree:
@@ -135,6 +130,20 @@ class SumTree:
 
         # count of how many transitions are being sampled from
         self.current_size = 0
+
+        # Enforces deterministic algorithms or throws error if none available
+        # i.e. scatter_add_ on CUDA devices, floating point arithmetic associativity
+        # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
+        torch.use_deterministic_algorithms(True)
+
+    def calculate_beta_end(self, num_steps):
+        """
+        specify the end of linear beta schedule,
+        when bias will be fully corrected
+        """
+        # ends at 80% of training to allow time for convergence
+        end_beta_schedule = round(0.8 * num_steps)
+        self.beta_end = end_beta_schedule
 
     def buffer_to_leaf(self, buffer):
         """converts buffer to leaf index/indices"""

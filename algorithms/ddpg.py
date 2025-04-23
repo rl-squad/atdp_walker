@@ -8,7 +8,6 @@ from algorithms.common import (
     QNetwork,
     PolicyNetwork,
     ReplayBuffer,
-    PrioritisedReplayBuffer,
     GaussianSampler,
     copy_params,
     polyak_update,
@@ -19,48 +18,34 @@ from algorithms.common import (
 class DDPG:
     def __init__(
         self,
+        buffer_size=1000000,
         batch_size=128,
         begin_learning=10000,
-        update_every=50,
-        exploration_noise_params=[0, 0.2],
+        exploration_noise_params=[0.0, 0.2],
         gamma = 0.99,
         q_lr=1e-4,
         policy_lr=1e-4,
         polyak=0.995,
         device=DEFAULT_DEVICE,
-        prioritised_experience_replay=False,
-        debug_per=False,
     ):
         e_mu, e_sigma = exploration_noise_params
-        
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         self.device = device
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         self.batch_size = batch_size
         self.begin_learning = begin_learning
-        self.update_every = update_every
         self.gamma = gamma
         self.polyak = polyak
-        if prioritised_experience_replay:
-            self.buffer = PrioritisedReplayBuffer(
-                buffer_size=2**20, # Closest power of 2 to 1 million
-                batch_size=batch_size,
-                begin_learning=begin_learning,
-                device=device
-            )
-        else:
-            self.buffer = ReplayBuffer(
-                buffer_size=1000000,
-                batch_size=batch_size,
-                device=device
-            )
-        # PER properties
-        self.prioritised_experience_replay = prioritised_experience_replay
-        self.debug_per = debug_per # for debugging the priorities buffer
-        self.log_every = 10000 # same as benchmark_every for comparison
+
+        # uniform sampling
+        self.buffer = ReplayBuffer(
+            buffer_size=buffer_size,
+            batch_size=batch_size,
+            device=device
+        )
 
         # initially set parameters of the target networks 
         # to those from the actual networks
@@ -72,7 +57,7 @@ class DDPG:
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=policy_lr)
 
         # define the loss function
-        self.loss = nn.HuberLoss(reduction='none')
+        self.loss = nn.MSELoss()
     
     # returns the policy action at state s
     def policy_action(self, s):
@@ -85,22 +70,11 @@ class DDPG:
         noise = self.exploration_noise.sample(a.shape)
 
         return torch.clamp(a + noise, min=-1, max=1)
-
-    def calculate_td_error(self, s, a, r, s_n, t):
-        """
-        batch-aware and single-sample td error calculation
-        terminated must be passed as a float32 tensor
-        """
-        with torch.no_grad():
-            target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
-            q = self.q(s, a)
-            td_error = target - q
-            return td_error
-
+    
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, t, w, buffer_indices = self.buffer.sample()
+        s, a, r, s_n, t = self.buffer.sample()
 
         with torch.no_grad():
             target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
@@ -108,10 +82,7 @@ class DDPG:
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
         q = self.q(s, a)
-
-        # If prioritised, fold normalised importance sampling weights into q-learning update
-        # If not, multiplies by 1s
-        loss = (w * self.loss(q, target)).mean()
+        loss = self.loss(q, target)
 
         self.q_optimizer.zero_grad()
         loss.backward()
@@ -129,13 +100,14 @@ class DDPG:
         polyak_update(self.q_target, self.q, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
 
-        if self.prioritised_experience_replay:
-            # After network updates, recalculate priorities of sampled transitions only
-            td_errors = self.calculate_td_error(s, a, r, s_n, t)
-            self.buffer.recalculate_priorities(buffer_indices, td_errors.squeeze())
-
     def train(self, num_episodes=5000, benchmark=False):
-        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
+        
+        env = TorchEnvironment(
+            num_episodes=num_episodes,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )
         
         steps = 0
         s, _ = env.reset()
@@ -161,17 +133,15 @@ class DDPG:
                 # update networks
                 self.update()
 
-                if self.prioritised_experience_replay:
-                    # beta schedule for annealling bias of PER sampling after updates
-                    self.buffer.sum_tree.anneal_beta()
-    
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
-        if self.update_every < num_envs:
-            raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
-        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
-        update_every = max((self.update_every // num_envs) * num_envs, num_envs)
-        log_every = max((self.log_every // num_envs) * num_envs, num_envs)
+        env = BatchEnvironment(
+            num_steps=num_steps,
+            num_envs=num_envs,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )  
 
         s, _ = env.reset()
         
@@ -199,18 +169,6 @@ class DDPG:
                 # update networks
                 for _ in range(num_envs):
                     self.update()
-                
-                if self.prioritised_experience_replay:
-                    # beta schedule for annealling bias of PER sampling after updates
-                    self.buffer.sum_tree.anneal_beta(steps=num_envs)
-
-            if self.prioritised_experience_replay and self.debug_per:
-
-                if (env.get_current_step() >= self.begin_learning) and (env.get_current_step() % log_every == 0):
-                    self.buffer.log_priorities()
-
-                if env.done():
-                    self.buffer.write_priorities_log(env.file_name)
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))

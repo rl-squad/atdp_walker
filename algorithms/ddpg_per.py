@@ -21,34 +21,36 @@ class DDPGPER:
         buffer_size=2**20, # Closest power of 2 to 1 mill
         batch_size=128,
         begin_learning=10000,
-        update_every=50,
-        exploration_noise_params=[0, 0.2],
+        exploration_noise_params=[0.0, 0.2],
         gamma = 0.99,
         q_lr=1e-4,
         policy_lr=1e-4,
         polyak=0.995,
-        device=DEFAULT_DEVICE
+        device=DEFAULT_DEVICE,
+        debug_per=False,
     ):
         e_mu, e_sigma = exploration_noise_params
-        
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         self.device = device
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
+        self.batch_size = batch_size
+        self.begin_learning = begin_learning
+        self.gamma = gamma
+        self.polyak = polyak
+        
         self.buffer = PrioritisedReplayBuffer(
             buffer_size=buffer_size,
             batch_size=batch_size,
             begin_learning=begin_learning,
             device=device
         )
-        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
 
-        self.batch_size = batch_size
-        self.begin_learning = begin_learning
-        self.update_every = update_every
-        self.gamma = gamma
-        self.polyak = polyak
+        # PER properties
+        self.debug_per = debug_per # for debugging the priorities buffer
+        self.log_every = 10000 # same as benchmark_every for comparison
 
         # initially set parameters of the target networks 
         # to those from the actual networks
@@ -59,8 +61,8 @@ class DDPGPER:
         self.q_optimizer = optim.Adam(self.q.parameters(), lr=q_lr)
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=policy_lr)
 
-        # define the loss function
-        self.loss = nn.MSELoss()
+        # HuberLoss, since gradients magnitudes are larger in prioritised replay
+        self.loss = nn.HuberLoss(reduction='none')
     
     # returns the policy action at state s
     def policy_action(self, s):
@@ -77,7 +79,7 @@ class DDPGPER:
     def calculate_td_error(self, s, a, r, s_n, t):
         """
         batch-aware and single-sample td error calculation
-        terminated must be passed as a float32 tensor
+        used for recalculating priorities
         """
         with torch.no_grad():
             target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
@@ -96,8 +98,11 @@ class DDPGPER:
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
         q = self.q(s, a)
-        # Fold normalised importance sampling weights into q-learning update
-        loss = self.loss(w * q, w * target)
+
+        # Fold normalised importance sampling weights into q-learning update.
+        # Each error is weighted downwards to correct bias so that update distribution
+        # is the same as uniform sampling
+        loss = (w * self.loss(q, target)).mean()
 
         self.q_optimizer.zero_grad()
         loss.backward()
@@ -120,7 +125,13 @@ class DDPGPER:
         self.buffer.recalculate_priorities(buffer_indices, td_errors.squeeze())
 
     def train(self, num_episodes=5000, benchmark=False):
-        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
+        
+        env = TorchEnvironment(
+            num_episodes=num_episodes,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )
         
         steps = 0
         s, _ = env.reset()
@@ -149,11 +160,18 @@ class DDPGPER:
                 self.buffer.sum_tree.anneal_beta()
 
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
-        if self.update_every < num_envs:
-            raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
 
-        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
-        update_every = max((self.update_every // num_envs) * num_envs, num_envs)
+        env = BatchEnvironment(
+            num_steps=num_steps,
+            num_envs=num_envs,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )
+
+        self.buffer.sum_tree.calculate_beta_end(num_steps)
+
+        log_every = max((self.log_every // num_envs) * num_envs, num_envs)
 
         s, _ = env.reset()
         
@@ -177,11 +195,22 @@ class DDPGPER:
             s = s_n
 
             if env.get_current_step() > self.begin_learning:
+                
                 # update networks
                 for _ in range(num_envs):
                     self.update()
+                
                 # beta schedule for annealling bias of PER sampling after updates
                 self.buffer.sum_tree.anneal_beta(steps=num_envs)
+            
+            # debug priorities of buffer, checking for degeneration and diversity issues
+            if self.debug_per:
+
+                if (env.get_current_step() >= self.begin_learning) and (env.get_current_step() % log_every == 0):
+                    self.buffer.log_priorities()
+
+                if env.done():
+                    self.buffer.write_priorities_log(env.file_name)
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
