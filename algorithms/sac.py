@@ -77,8 +77,10 @@ class SAC:
         alpha=0.2,
         lr=3e-4,
         device=DEFAULT_DEVICE,
+        use_policy=True,  # New: controls whether to pass policy to the environment
     ):
         self.device = device
+        self.use_policy = use_policy
 
         # Q networks and targets (Q1, Q2 are twin critics)
         self.q1 = QNetwork().to(device)
@@ -166,7 +168,12 @@ class SAC:
 
     def train(self, num_episodes=5000, benchmark=False):
         # Create the gym environment wrapper
-        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
+        env = TorchEnvironment(
+            num_episodes=num_episodes,
+            policy=self.policy if self.use_policy else None,  # Respect use_policy
+            benchmark=benchmark,
+            device=self.device
+        )
 
         steps = 0
         s, _ = env.reset()
