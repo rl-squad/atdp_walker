@@ -6,6 +6,7 @@ import torch
 
 # local imports
 from algorithms.common import PolicyNetwork, copy_params, DEFAULT_DEVICE
+from algorithms.noisy_net import NoisyPolicyNetwork
 
 class Environment:
     def __init__(self, num_episodes, render_mode = "rgb_array"):
@@ -130,7 +131,7 @@ class TorchEnvironment(Environment):
     
 
 class BatchEnvironment:
-    def __init__(self, num_envs=10, num_steps=1000000, policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE):
+    def __init__(self, num_envs=10, num_steps=1000000, policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE, use_noisy_policy=False):
         file_name = os.getenv("OUT")
         
         # no output dir raise value error
@@ -146,6 +147,7 @@ class BatchEnvironment:
         self.benchmark_results = []
         self.device = device
         self.current_step = 0
+        self.use_noisy_policy = use_noisy_policy
         self.envs = gym.vector.AsyncVectorEnv(
             [lambda: gym.make("Walker2d-v5") for _ in range(num_envs)],
             autoreset_mode=gym.vector.AutoresetMode.SAME_STEP
@@ -195,7 +197,12 @@ class BatchEnvironment:
 
     def _policy_snapshot(self):
         # create a new policy network and clone the current policy
-        policy = PolicyNetwork().to(self.device)
+
+        if self.use_noisy_policy:
+            policy = NoisyPolicyNetwork().to(self.device)
+        else:
+            policy = PolicyNetwork().to(self.device)
+        
         copy_params(policy, self.policy)
 
         return policy
