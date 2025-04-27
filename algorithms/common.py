@@ -134,7 +134,8 @@ class SumTree:
         # Enforces deterministic algorithms or throws error if none available
         # i.e. scatter_add_ on CUDA devices, floating point arithmetic associativity
         # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
-        torch.use_deterministic_algorithms(True)
+        # slows down training significantly
+        # torch.use_deterministic_algorithms(True)
 
     def calculate_beta_end(self, num_steps):
         """

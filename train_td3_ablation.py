@@ -19,7 +19,7 @@ def main():
                 target_policy_smoothing=bool(i & 1),
             )
             
-            td3_ablation.train_batch(num_steps=6000000, benchmark=True)
+            td3_ablation.train_batch(num_steps=3000000, benchmark=True)
 
             # print(os.getenv("OUT"), bool(i & 4), bool(i & 2), bool(i & 1))
 
