@@ -20,31 +20,32 @@ class DDPG:
         self,
         buffer_size=1000000,
         batch_size=128,
-        start_steps=10000,
-        update_after=1000,
-        update_every=50, exploration_noise_params=[0, 0.2],
+        begin_learning=10000,
+        exploration_noise_params=[0.0, 0.2],
         gamma = 0.99,
         q_lr=1e-4,
         policy_lr=1e-4,
         polyak=0.995,
-        device=DEFAULT_DEVICE
+        device=DEFAULT_DEVICE,
     ):
         e_mu, e_sigma = exploration_noise_params
-        
+        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         self.device = device
         self.q = QNetwork().to(device)
         self.q_target = QNetwork().to(device)
         self.policy = PolicyNetwork().to(device)
         self.policy_target = PolicyNetwork().to(device)
-        self.buffer = ReplayBuffer(buffer_size, device=device)
-        self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
-        
         self.batch_size = batch_size
-        self.start_steps = start_steps
-        self.update_after = update_after
-        self.update_every = update_every
+        self.begin_learning = begin_learning
         self.gamma = gamma
         self.polyak = polyak
+
+        # uniform sampling
+        self.buffer = ReplayBuffer(
+            buffer_size=buffer_size,
+            batch_size=batch_size,
+            device=device
+        )
 
         # initially set parameters of the target networks 
         # to those from the actual networks
@@ -73,10 +74,10 @@ class DDPG:
     # the update is implemented as described here
     # https://spinningup.openai.com/en/latest/algorithms/ddpg.html
     def update(self):
-        s, a, r, s_n, d = self.buffer.sample(self.batch_size)
+        s, a, r, s_n, t = self.buffer.sample()
 
         with torch.no_grad():
-            target = r + self.gamma * (1 - d) * self.q_target(s_n, self.policy_target(s_n))
+            target = r + self.gamma * (1 - t) * self.q_target(s_n, self.policy_target(s_n))
 
         # do a gradient descent update of the
         # q network to minimize the MSBE loss
@@ -99,15 +100,20 @@ class DDPG:
         polyak_update(self.q_target, self.q, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
 
-
     def train(self, num_episodes=5000, benchmark=False):
-        env = TorchEnvironment(num_episodes=num_episodes, policy=self.policy, benchmark=benchmark, device=self.device)
+        
+        env = TorchEnvironment(
+            num_episodes=num_episodes,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )
         
         steps = 0
         s, _ = env.reset()
 
         while not env.done():
-            if steps < self.start_steps:
+            if steps < self.begin_learning:
                 a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -122,21 +128,25 @@ class DDPG:
             
             steps += 1
 
-            if (steps > self.update_after) and (steps % self.update_every == 0):
-                for _ in range(self.update_every):
-                    self.update()
-    
-    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
-        if self.update_every < num_envs:
-            raise ValueError(f"the value of self.update_every must be greater than num_envs. self.update_every is currently set to {self.update_every}")
+            if steps > self.begin_learning:
 
-        env = BatchEnvironment(num_steps=num_steps, num_envs=num_envs, policy=self.policy, benchmark=benchmark, device=self.device)
-        update_every = max((self.update_every // num_envs) * num_envs, num_envs)  
+                # update networks
+                self.update()
+
+    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
+
+        env = BatchEnvironment(
+            num_steps=num_steps,
+            num_envs=num_envs,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )  
 
         s, _ = env.reset()
         
         while not env.done():
-            if env.get_current_step() < self.start_steps:
+            if env.get_current_step() < self.begin_learning:
                 a = 2 * torch.rand((num_envs, ACTION_DIM), device=self.device) - 1
             else:
                 a = self.noisy_policy_action(s)
@@ -154,8 +164,10 @@ class DDPG:
             
             s = s_n
 
-            if env.get_current_step() > self.update_after and env.get_current_step() % update_every == 0:
-                for _ in range(update_every):
+            if env.get_current_step() > self.begin_learning:
+
+                # update networks
+                for _ in range(num_envs):
                     self.update()
 
     def load_policy(self, path):

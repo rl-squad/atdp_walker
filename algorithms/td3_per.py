@@ -7,7 +7,7 @@ from environment import TorchEnvironment, BatchEnvironment
 from algorithms.common import (
     QNetwork,
     PolicyNetwork,
-    ReplayBuffer,
+    PrioritisedReplayBuffer,
     GaussianSampler,
     copy_params,
     polyak_update,
@@ -15,10 +15,10 @@ from algorithms.common import (
     DEFAULT_DEVICE
 )
 
-class TD3:
+class TD3PER:
     def __init__(
         self,
-        buffer_size=1000000,
+        buffer_size=2**20, # Closest power of 2 to 1 mill
         batch_size=128,
         begin_learning=10000,
         policy_delay=2,
@@ -29,6 +29,7 @@ class TD3:
         policy_lr=1e-4,
         polyak=0.995,
         device=DEFAULT_DEVICE,
+        debug_per=False,
     ):
         e_mu, e_sigma = exploration_noise_params
         s_mu, s_sigma, s_clip = smoothing_noise_params
@@ -46,13 +47,17 @@ class TD3:
         self.policy_delay = policy_delay
         self.gamma = gamma
         self.polyak = polyak
-
-        # uniform sampling
-        self.buffer = ReplayBuffer(
+        
+        self.buffer = PrioritisedReplayBuffer(
             buffer_size=buffer_size,
             batch_size=batch_size,
+            begin_learning=begin_learning,
             device=device
         )
+
+        # PER properties
+        self.debug_per = debug_per # for debugging the priorities buffer
+        self.log_every = 10000 # same as benchmark_every for comparison
 
         copy_params(self.q1_target, self.q1)
         copy_params(self.q2_target, self.q2)
@@ -62,21 +67,24 @@ class TD3:
         self.q2_optimizer = optim.Adam(self.q2.parameters(), lr=q_lr)
         self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=policy_lr)
 
-        self.loss = nn.MSELoss()
+        # HuberLoss, since gradients magnitudes are larger in prioritised replay
+        self.loss = nn.HuberLoss(reduction='none')
 
     def policy_action(self, s):
         with torch.no_grad():
             return self.policy(s)
-        
+
     def noisy_policy_action(self, s):
         a = self.policy_action(s)
         noise = self.exploration_noise.sample(a.shape)
 
         return torch.clamp(a + noise, min=-1, max=1)
 
-    def update(self, skip_policy_update):
-        s, a, r, s_n, t = self.buffer.sample()
-
+    def calculate_td_error(self, s, a, r, s_n, t):
+        """
+        batch-aware and single-sample td error calculation
+        used for recalculating priorities
+        """
         with torch.no_grad():
             a_target = torch.clamp(
                 self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
@@ -88,19 +96,49 @@ class TD3:
                 self.q2_target(s_n, a_target)
             )
 
+            # Minimum estimate between (q1, q2) to correct overestimation bias
+            # in estimate of TD error for priorities recalculation
+            td_error = target - torch.min(
+                self.q1(s, a),
+                self.q2(s, a)
+            )
+            return td_error
+
+    def update(self, skip_policy_update):
+        s, a, r, s_n, t, w, buffer_indices = self.buffer.sample()
+
+        with torch.no_grad():
+            a_target = torch.clamp(
+                self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
+                min=-1,
+                max=1
+            )
+            target = r + self.gamma * (1 - t) * torch.min(
+                self.q1_target(s_n, a_target),
+                self.q2_target(s_n, a_target)
+            )
+        
+        # Fold normalised importance sampling weights into q-learning updates
+        # Each error is weighted downwards to correct bias so that update distribution
+        # is the same as uniform sampling
+
         q1 = self.q1(s, a)
-        loss1 = self.loss(q1, target)
+        loss1 = (w * self.loss(q1, target)).mean()
 
         self.q1_optimizer.zero_grad()
         loss1.backward()
         self.q1_optimizer.step()
 
         q2 = self.q2(s, a)
-        loss2 = self.loss(q2, target)
+        loss2 = (w * self.loss(q2, target)).mean()
 
         self.q2_optimizer.zero_grad()
         loss2.backward()
         self.q2_optimizer.step()
+
+        # Recalculate priorities of sampled transitions only
+        td_errors = self.calculate_td_error(s, a, r, s_n, t)
+        self.buffer.recalculate_priorities(buffer_indices, td_errors.squeeze())
 
         if skip_policy_update:
             return
@@ -151,6 +189,9 @@ class TD3:
                 # update networks
                 self.update(skip_policy_update=(steps % self.policy_delay != 0))
 
+                # beta schedule for annealling bias of PER sampling after updates
+                self.buffer.sum_tree.anneal_beta()
+    
     def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
 
         env = BatchEnvironment(
@@ -160,6 +201,10 @@ class TD3:
             benchmark=benchmark,
             device=self.device
         )
+
+        self.buffer.sum_tree.calculate_beta_end(num_steps)
+
+        log_every = max((self.log_every // num_envs) * num_envs, num_envs)
 
         s, _ = env.reset()
         
@@ -187,6 +232,18 @@ class TD3:
                 # update networks
                 for i in range(num_envs):
                     self.update(skip_policy_update=(i % self.policy_delay != 0))
+                
+                # beta schedule for annealling bias of PER sampling after updates
+                self.buffer.sum_tree.anneal_beta(steps=num_envs)
+            
+            # debug priorities of buffer, checking for degeneration and diversity issues
+            if self.debug_per:
+
+                if (env.get_current_step() >= self.begin_learning) and (env.get_current_step() % log_every == 0):
+                    self.buffer.log_priorities()
+
+                if env.done():
+                    self.buffer.write_priorities_log(env.file_name)
 
     def load_policy(self, path):
         self.policy.load_state_dict(torch.load(path, map_location=self.device))

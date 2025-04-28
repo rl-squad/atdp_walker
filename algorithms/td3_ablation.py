@@ -15,7 +15,7 @@ from algorithms.common import (
     DEFAULT_DEVICE
 )
 
-class TD3:
+class TD3_Ablation:
     def __init__(
         self,
         buffer_size=1000000,
@@ -29,7 +29,15 @@ class TD3:
         policy_lr=1e-4,
         polyak=0.995,
         device=DEFAULT_DEVICE,
+        double_clipped_Q=False,
+        delayed_policy_updates=False,
+        target_policy_smoothing=False
     ):
+        # Ablation study
+        self.double_clipped_Q = double_clipped_Q
+        self.delayed_policy_updates = delayed_policy_updates
+        self.target_policy_smoothing = target_policy_smoothing
+
         e_mu, e_sigma = exploration_noise_params
         s_mu, s_sigma, s_clip = smoothing_noise_params
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
@@ -78,15 +86,23 @@ class TD3:
         s, a, r, s_n, t = self.buffer.sample()
 
         with torch.no_grad():
-            a_target = torch.clamp(
-                self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
-                min=-1,
-                max=1
-            )
-            target = r + self.gamma * (1 - t) * torch.min(
-                self.q1_target(s_n, a_target),
-                self.q2_target(s_n, a_target)
-            )
+
+            if self.target_policy_smoothing:
+                a_target = torch.clamp(
+                    self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
+                    min=-1,
+                    max=1
+                )
+            else:
+                a_target = self.policy_target(s_n)
+
+            if self.double_clipped_Q:
+                target = r + self.gamma * (1 - t) * torch.min(
+                    self.q1_target(s_n, a_target),
+                    self.q2_target(s_n, a_target)
+                )
+            else:
+                target = r + self.gamma * (1 - t) * self.q1_target(s_n, a_target)
 
         q1 = self.q1(s, a)
         loss1 = self.loss(q1, target)
@@ -95,14 +111,15 @@ class TD3:
         loss1.backward()
         self.q1_optimizer.step()
 
-        q2 = self.q2(s, a)
-        loss2 = self.loss(q2, target)
+        if self.double_clipped_Q:
+            q2 = self.q2(s, a)
+            loss2 = self.loss(q2, target)
 
-        self.q2_optimizer.zero_grad()
-        loss2.backward()
-        self.q2_optimizer.step()
+            self.q2_optimizer.zero_grad()
+            loss2.backward()
+            self.q2_optimizer.step()
 
-        if skip_policy_update:
+        if self.delayed_policy_updates and skip_policy_update:
             return
         
         # do a gradient ascent update of the policy network
@@ -115,8 +132,10 @@ class TD3:
 
         # update target networks whenever policy is updated
         polyak_update(self.q1_target, self.q1, self.polyak)
-        polyak_update(self.q2_target, self.q2, self.polyak)
         polyak_update(self.policy_target, self.policy, self.polyak)
+        
+        if self.double_clipped_Q:
+            polyak_update(self.q2_target, self.q2, self.polyak)
 
     def train(self, num_episodes=5000, benchmark=False):
         

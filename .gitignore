@@ -1,4 +1,6 @@
 __pycache__
 /out
 
+.DS_Store
+test.py
 poetry.lock
