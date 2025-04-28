@@ -57,7 +57,7 @@ class Environment:
     
 
 class TorchEnvironment(Environment):
-    def __init__(self, num_episodes, render_mode="rgb_array", policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE):
+    def __init__(self, num_episodes, render_mode="rgb_array", policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE, use_noisy_policy=False):
         super().__init__(num_episodes, render_mode)
 
         if policy is None and benchmark:
@@ -67,7 +67,8 @@ class TorchEnvironment(Environment):
         self.benchmark = benchmark
         self.benchmark_every = benchmark_every
         self.device = device
-        
+        self.use_noisy_policy = use_noisy_policy  #new argument
+
         self.current_step = 0
         self.benchmark_results = []
     
