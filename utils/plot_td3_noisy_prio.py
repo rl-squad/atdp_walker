@@ -3,28 +3,35 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats
+from collections import defaultdict
 
-def plot_td3_ablation():
-    # find all experiment benchmark files
-    files = glob.glob('./out/td3_ablation_*_*_bench.npy')
+def plot_td3_noisy_prio():
+
+    noisy_prio_files = glob.glob('./out/td3_noisy_prio_*_*_bench.npy')
+    # reusing TD3 data from td3_ablation
+    td3_files = glob.glob('./out/td3_ablation_7_*_bench.npy')
     random_walker = glob.glob('./out/random_walker_bench.npy')
-    
-    if not files:
-        print("No benchmark files found in ./out")
-        return
 
     # group files by experiment
-    experiments = {}
-    for file in files:
+    experiments = defaultdict(list)
+
+    # 0 TD3
+    # 1 TD3 + prioritised_xp_replay
+    # 2 TD3 + noisy_policy_network
+    # 3 TD3 + prioritised_xp_replay + noisy_policy_network
+
+    for file in td3_files:
+        experiment_id = 0
+        experiments[experiment_id].append(file)
+    
+    for file in noisy_prio_files:
         basename = os.path.basename(file)
         parts = basename.split('_')
-        experiment_id = parts[2]
-        if experiment_id not in experiments:
-            experiments[experiment_id] = []
+        experiment_id = int(parts[3]) + 1
         experiments[experiment_id].append(file)
-
+    
     plt.figure(figsize=(12, 8))
-    colors = plt.cm.Dark2(np.linspace(0, 1, len(experiments)))
+    colors = plt.cm.viridis(np.linspace(0, 1, len(experiments)))
     
     # plot random agent
     timesteps = np.arange(300) * 1e4
@@ -47,7 +54,7 @@ def plot_td3_ablation():
 
         # stack all agents
         stacked_data = np.stack(all_agents_data)
-        # extract the means, shape (mean, sd)
+        # extract the means of each agent, shape (mean, sd)
         means = stacked_data[:, :, 0]
 
         # mean eps reward across 10 agents
@@ -57,18 +64,19 @@ def plot_td3_ablation():
         ci = 1.96 * sem
 
         timesteps = np.arange(len(combined_mean)) * 1e4 # benchmark every 10k steps
-        label = f"Exp {experiment_id}: " + get_ablation_label(int(experiment_id))
-        plt.plot(timesteps, combined_mean, label=label, color=colors[int(experiment_id)])
+        label = f"Exp {experiment_id}: " + get_label(experiment_id)
+        plt.plot(timesteps, combined_mean, label=label, color=colors[experiment_id])
         plt.fill_between(
             timesteps,
             combined_mean - ci,
             combined_mean + ci,
             alpha=0.2,
-            color=colors[int(experiment_id)],
+            color=colors[experiment_id],
             linewidth=0
         )
 
-    plt.title("TD3 Ablation Study (Mean ± 95% CI across 10 agents)", fontweight="bold")
+    plt.title("TD3 with Noisy Policy Network and Prioritised Experience " \
+              "Replay Optimisations (Mean ± 95% CI across 10 agents)", fontweight="bold")
     plt.xlabel("Training Steps")
     plt.ylabel("Mean Episode Reward")
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -76,23 +84,11 @@ def plot_td3_ablation():
     plt.tight_layout()
     plt.show()
 
-    # 000 0 DDPG
-    # 001 1 target_policy_smoothing
-    # 010 2 delayed_policy_updates
-    # 011 3 target_policy_smoothing + delayed_policy_updates
-    # 100 4 double_clipped_Q
-    # 101 5 double_clipped_Q + target_policy_smoothing
-    # 110 6 double_clipped_Q delayed_policy_updates
-    # 111 7 TD3
-
-def get_ablation_label(exp_id):
-    if exp_id == 7:
-        return "TD3"
-    components = ["DDPG"]
-    if exp_id & 4: components.append("double_clipped_Q")
-    if exp_id & 2: components.append("delayed_policy_updates")
-    if exp_id & 1: components.append("target_policy_smoothing")
+def get_label(exp_id):
+    components = ["TD3"]
+    if exp_id > 1: components.append("noisy_policy_network")
+    if exp_id % 2 == 1: components.append("prioritised_xp_replay")
     return " + \n".join(components)
 
 if __name__ == "__main__":
-    plot_td3_ablation()
+    plot_td3_noisy_prio()
