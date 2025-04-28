@@ -28,8 +28,11 @@ class DDPGPER:
         polyak=0.995,
         device=DEFAULT_DEVICE,
         debug_per=False,
+        seed=0
     ):
-        e_mu, e_sigma = exploration_noise_params
+        torch.manual_seed(seed)
+
+        e_mu, e_sigma = exploration_noise_params 
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
         self.device = device
         self.q = QNetwork().to(device)
@@ -40,6 +43,7 @@ class DDPGPER:
         self.begin_learning = begin_learning
         self.gamma = gamma
         self.polyak = polyak
+        self.seed = seed
         
         self.buffer = PrioritisedReplayBuffer(
             buffer_size=buffer_size,
@@ -134,7 +138,7 @@ class DDPGPER:
         )
         
         steps = 0
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
 
         while not env.done():
             if steps < self.begin_learning:
@@ -173,7 +177,7 @@ class DDPGPER:
 
         log_every = max((self.log_every // num_envs) * num_envs, num_envs)
 
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
         
         while not env.done():
             if env.get_current_step() < self.begin_learning:
