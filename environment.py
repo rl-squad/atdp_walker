@@ -6,7 +6,7 @@ import torch
 
 # local imports
 from algorithms.common import PolicyNetwork, copy_params, DEFAULT_DEVICE
-from algorithms.noisy_net import NoisyPolicyNetwork
+from algorithms.stochastic_policy_net import StochasticPolicyNetwork
 
 class Environment:
     def __init__(self, num_episodes, render_mode = "rgb_array"):
@@ -196,12 +196,7 @@ class BatchEnvironment:
 
     def _policy_snapshot(self):
         # create a new policy network and clone the current policy
-
-        if self.use_noisy_policy:
-            policy = NoisyPolicyNetwork().to(self.device)
-        else:
-            policy = PolicyNetwork().to(self.device)
-        
+        policy = type(self.policy)().to(self.device)
         copy_params(policy, self.policy)
 
         return policy
@@ -215,7 +210,11 @@ class BatchEnvironment:
             s, _ = env.reset(seed=i)
             
             while True:
-                a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+                if isinstance(policy, StochasticPolicyNetwork):
+                    a = policy.mean_action(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+                else:
+                    a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+
                 s, r, terminated, truncated, _ = env.step(a)
 
                 episode_rewards[i] += r
