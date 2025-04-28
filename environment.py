@@ -5,7 +5,7 @@ import gymnasium as gym
 import torch
 
 # local imports
-from algorithms.common import PolicyNetwork, copy_params, DEFAULT_DEVICE
+from algorithms.common import copy_params, DEFAULT_DEVICE
 from algorithms.stochastic_policy_net import StochasticPolicyNetwork
 
 class Environment:
@@ -101,7 +101,7 @@ class TorchEnvironment(Environment):
     
     def _policy_snapshot(self):
         # create a new policy network and clone the current policy
-        policy = PolicyNetwork().to(self.device)
+        policy = type(self.policy)().to(self.device)
         copy_params(policy, self.policy)
 
         return policy
@@ -196,7 +196,7 @@ class BatchEnvironment:
 
     def _policy_snapshot(self):
         # create a new policy network and clone the current policy
-        policy = type(self.policy)().to(self.device)
+        policy = type(self.policy)().to(self.device) 
         copy_params(policy, self.policy)
 
         return policy

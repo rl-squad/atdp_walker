@@ -194,7 +194,6 @@ class NoisyPrioritisedTD3:
             num_steps=num_steps,
             num_envs=num_envs,
             policy=self.policy,
-            use_noisy_policy=self.noisy_net,
             benchmark=benchmark,
             device=self.device
         )
