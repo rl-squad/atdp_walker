@@ -49,8 +49,8 @@ class Environment:
 
         return observation, reward, terminated, truncated, info
 
-    def reset(self):
-        return self.env.reset()
+    def reset(self, seed=0):
+        return self.env.reset(seed=seed)
     
     def done(self):
         return self.episode == self.num_episodes
@@ -95,8 +95,8 @@ class TorchEnvironment(Environment):
 
         return observation, reward, terminated, truncated, info
 
-    def reset(self):
-        s, info = super().reset()
+    def reset(self, seed=0):
+        s, info = super().reset(seed=seed)
         s = torch.tensor(s, dtype=torch.float32, device=self.device)
 
         return s, info
@@ -184,8 +184,8 @@ class BatchEnvironment:
 
         return observation, reward, terminated, truncated, info
     
-    def reset(self):
-        observation, info = self.envs.reset()
+    def reset(self, seed=0):
+        observation, info = self.envs.reset(seed=seed)
         observation = torch.tensor(observation, dtype=torch.float32, device=self.device)
 
         return observation, info
@@ -214,7 +214,7 @@ class BatchEnvironment:
         episode_rewards = np.zeros(num_episodes)
         
         for i in range(num_episodes):
-            s, _ = env.reset()
+            s, _ = env.reset(seed=i)
             
             while True:
                 a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()

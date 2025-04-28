@@ -34,7 +34,10 @@ class NoisyPrioritisedTD3:
         debug_per=False,
         noisy_net=False,
         prioritised_xp_replay=False,
+        seed = 0
     ):
+        torch.manual_seed(seed)
+
         self.noisy_net=noisy_net
         self.prioritised_xp_replay=prioritised_xp_replay
 
@@ -60,6 +63,7 @@ class NoisyPrioritisedTD3:
         self.policy_delay = policy_delay
         self.gamma = gamma
         self.polyak = polyak
+        self.seed = seed
         
         if self.prioritised_xp_replay:
             self.buffer = PrioritisedReplayBuffer(
@@ -199,7 +203,7 @@ class NoisyPrioritisedTD3:
             self.buffer.sum_tree.calculate_beta_end(num_steps)
             log_every = max((self.log_every // num_envs) * num_envs, num_envs)
 
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
         
         while not env.done():
             if env.get_current_step() < self.begin_learning:

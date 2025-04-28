@@ -29,7 +29,10 @@ class TD3:
         policy_lr=1e-4,
         polyak=0.995,
         device=DEFAULT_DEVICE,
+        seed=0
     ):
+        torch.manual_seed(seed)
+
         e_mu, e_sigma = exploration_noise_params
         s_mu, s_sigma, s_clip = smoothing_noise_params
         self.exploration_noise = GaussianSampler(mean=e_mu, sigma=e_sigma, device=device)
@@ -46,6 +49,7 @@ class TD3:
         self.policy_delay = policy_delay
         self.gamma = gamma
         self.polyak = polyak
+        self.seed = seed
 
         # uniform sampling
         self.buffer = ReplayBuffer(
@@ -128,7 +132,7 @@ class TD3:
         )
 
         steps = 0
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
 
         while not env.done():
             if steps < self.begin_learning:
@@ -161,7 +165,7 @@ class TD3:
             device=self.device
         )
 
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
         
         while not env.done():
             if env.get_current_step() < self.begin_learning:

@@ -31,8 +31,11 @@ class TD3_Ablation:
         device=DEFAULT_DEVICE,
         double_clipped_Q=False,
         delayed_policy_updates=False,
-        target_policy_smoothing=False
+        target_policy_smoothing=False,
+        seed=0
     ):
+        torch.manual_seed(seed)
+
         # Ablation study
         self.double_clipped_Q = double_clipped_Q
         self.delayed_policy_updates = delayed_policy_updates
@@ -54,6 +57,7 @@ class TD3_Ablation:
         self.policy_delay = policy_delay
         self.gamma = gamma
         self.polyak = polyak
+        self.seed = seed
 
         # uniform sampling
         self.buffer = ReplayBuffer(
@@ -147,7 +151,7 @@ class TD3_Ablation:
         )
 
         steps = 0
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
 
         while not env.done():
             if steps < self.begin_learning:
@@ -180,7 +184,7 @@ class TD3_Ablation:
             device=self.device
         )
 
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
         
         while not env.done():
             if env.get_current_step() < self.begin_learning:
