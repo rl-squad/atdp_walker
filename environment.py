@@ -66,7 +66,7 @@ class TorchEnvironment(Environment):
         self.benchmark = benchmark
         self.benchmark_every = benchmark_every
         self.device = device
-        self.use_noisy_policy = use_noisy_policy  # <- nuevo argumento
+        self.use_noisy_policy = use_noisy_policy  #new argument
 
         self.current_step = 0
         self.benchmark_results = []
