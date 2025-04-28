@@ -201,7 +201,7 @@ class SAC:
 
             # Reset if episode ends
             if terminated or truncated:
-                s, _ = env.reset(seed=self.seed)
+                s, _ = env.reset()
 
             steps += 1
 
