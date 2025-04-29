@@ -13,6 +13,7 @@ def main():
             os.environ["OUT"] = base + str(i) + "_" + str(j)
 
             td3_noisy_prio = NoisyPrioritisedTD3(
+                seed=j,
                 prioritised_xp_replay=(i != 1),
                 debug_per=(i != 1),
                 noisy_net=(i != 0),

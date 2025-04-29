@@ -130,7 +130,18 @@ class TorchEnvironment(Environment):
     
 
 class BatchEnvironment:
-    def __init__(self, num_envs=10, num_steps=1000000, policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE, use_noisy_policy=False):
+    def __init__(
+        self,
+        num_envs=10,
+        num_steps=1000000,
+        policy=None,
+        benchmark=False,
+        benchmark_every=10000,
+        begin_learning=10000,
+        device=DEFAULT_DEVICE,
+        log_save_policy_weights=False
+    ):
+
         file_name = os.getenv("OUT")
         
         # no output dir raise value error
@@ -143,15 +154,26 @@ class BatchEnvironment:
         self.policy = policy
         self.benchmark = benchmark
         self.benchmark_every = max((benchmark_every // num_envs) * num_envs, num_envs)
+        self.begin_learning = begin_learning
         self.benchmark_results = []
         self.device = device
         self.current_step = 0
-        self.use_noisy_policy = use_noisy_policy
         self.envs = gym.vector.AsyncVectorEnv(
             [lambda: gym.make("Walker2d-v5") for _ in range(num_envs)],
             autoreset_mode=gym.vector.AutoresetMode.SAME_STEP
         )
         self.pbar = tqdm(total=num_steps)
+
+        # saves policy at log scale step intervals after the first update
+        self.log_save_policy_weights = log_save_policy_weights
+        self.log_step_intervals = {
+            begin_learning + 10: "10",
+            begin_learning + 100: "100",
+            begin_learning + 1000: "1k",
+            begin_learning + 10000: "10k",
+            begin_learning + 100000: "100k",
+            begin_learning + 1000000: "1m"
+        }
 
         os.makedirs("./out", exist_ok=True)
     
@@ -164,6 +186,13 @@ class BatchEnvironment:
         terminated = torch.tensor(terminated, dtype=torch.bool, device=self.device)
         truncated = torch.tensor(truncated, dtype=torch.bool, device=self.device)
 
+        # saves the current policy weights at log interval steps after the first update
+        if self.log_save_policy_weights and (self.current_step in self.log_step_intervals):
+            torch.save(
+                self.policy.state_dict(),
+                f"out/{self.file_name}_{self.log_step_intervals[self.current_step]}.pth"
+            )
+
         self.current_step += self.num_envs
         self.pbar.update(self.num_envs)
 
@@ -174,7 +203,7 @@ class BatchEnvironment:
             if self.benchmark:
                 np.save(f"out/{self.file_name}_bench.npy", self.benchmark_results)
 
-            torch.save(self.policy.state_dict(), f"out/{self.file_name}.pth")
+            torch.save(self.policy.state_dict(), f"out/{self.file_name}_end.pth")
 
         if self.done():
             self.envs.close()

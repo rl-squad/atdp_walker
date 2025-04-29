@@ -15,6 +15,8 @@ def plot_td3_noisy_prio():
     # group files by experiment
     experiments = defaultdict(list)
 
+    plt.rcParams.update({'font.size': 12})
+
     # 0 TD3
     # 1 TD3 + prioritised_xp_replay
     # 2 TD3 + noisy_policy_network
