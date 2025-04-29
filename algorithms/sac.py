@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from environment import TorchEnvironment
+from environment import TorchEnvironment, BatchEnvironment
 from algorithms.common import (
     QNetwork,
     ReplayBuffer,
@@ -13,74 +13,25 @@ from algorithms.common import (
     STATE_DIM
 )
 
-# Stochastic policy network that outputs Gaussian distribution (mean and std)
-class StochasticPolicyNetwork(nn.Module):
-    def __init__(self, hidden_sizes=[256, 256]):
-        super().__init__()
-
-        # First fully-connected (dense) layer: input is state vector
-        self.fc1 = nn.Linear(STATE_DIM, hidden_sizes[0])
-
-        # Second hidden layer
-        self.fc2 = nn.Linear(hidden_sizes[0], hidden_sizes[1])
-
-        # Final output layers: mean and log standard deviation of action distribution
-        self.mu_layer = nn.Linear(hidden_sizes[1], ACTION_DIM)
-        self.log_std_layer = nn.Linear(hidden_sizes[1], ACTION_DIM)
-
-    def forward(self, state):
-        # Apply ReLU activation to hidden layers
-        x = torch.relu(self.fc1(state))
-        x = torch.relu(self.fc2(x))
-
-        # Output mean of the Gaussian
-        mu = self.mu_layer(x)
-
-        # Output log standard deviation, then exponentiate to get std
-        log_std = self.log_std_layer(x)
-        log_std = torch.clamp(log_std, -20, 2)  # constrain log_std range
-        std = torch.exp(log_std)
-
-        return mu, std
-
-    def sample(self, state):
-        # Sample actions from squashed Gaussian using reparameterization trick
-        mu, std = self.forward(state)
-        normal = torch.distributions.Normal(mu, std)
-        z = normal.rsample()  # allows gradients to flow
-
-        action = torch.tanh(z)  # squash action to [-1, 1] range
-
-        # Correct the log probability due to tanh squashing
-        log_prob = normal.log_prob(z)
-        log_prob -= torch.log(1 - action.pow(2) + 1e-6)
-        log_prob = log_prob.sum(dim=-1, keepdim=True)
-
-        return action, log_prob
-
-    def mean_action(self, state):
-        # Deterministic action used for evaluation (no sampling)
-        mu, _ = self.forward(state)
-        return torch.tanh(mu)
-
+from algorithms.stochastic_policy_net import StochasticPolicyNetwork
 
 class SAC:
     def __init__(
         self,
         buffer_size=1000000,
         batch_size=128,
-        start_steps=10000,
-        update_after=1000,
-        update_every=50,
+        begin_learning=10000,
         gamma=0.99,
         polyak=0.995,
         alpha=0.2,
-        lr=3e-4,
+        q_lr=1e-3,
+        policy_lr=3e-4,
         device=DEFAULT_DEVICE,
-        use_policy=True,  # New: controls whether to pass policy to the environment
+        seed=0
     ):
+        torch.manual_seed(seed)
+        self.seed = seed
         self.device = device
-        self.use_policy = use_policy
 
         # Q networks and targets (Q1, Q2 are twin critics)
         self.q1 = QNetwork().to(device)
@@ -96,18 +47,20 @@ class SAC:
         copy_params(self.q2_target, self.q2)
 
         # Optimizers for Q and policy networks
-        self.q1_optimizer = optim.Adam(self.q1.parameters(), lr=lr)
-        self.q2_optimizer = optim.Adam(self.q2.parameters(), lr=lr)
-        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=lr)
+        self.q1_optimizer = optim.Adam(self.q1.parameters(), lr=q_lr)
+        self.q2_optimizer = optim.Adam(self.q2.parameters(), lr=q_lr)
+        self.policy_optimizer = optim.Adam(self.policy.parameters(), lr=policy_lr)
 
-        # Experience replay buffer
-        self.buffer = ReplayBuffer(buffer_size, device=device)
+        # uniform sampling
+        self.buffer = ReplayBuffer(
+            buffer_size=buffer_size,
+            batch_size=batch_size,
+            device=device
+        )
 
         # Hyperparameters
         self.batch_size = batch_size
-        self.start_steps = start_steps
-        self.update_after = update_after
-        self.update_every = update_every
+        self.begin_learning = begin_learning
         self.gamma = gamma
         self.polyak = polyak
         self.alpha = alpha
@@ -115,9 +68,14 @@ class SAC:
         # Mean Squared Error loss for Q-value regression
         self.loss_fn = nn.MSELoss()
 
+    def policy_action(self, s):
+        with torch.no_grad():
+            a, _ = self.policy.sample(s)
+            return a
+
     def update(self):
         # Sample batch from replay buffer
-        s, a, r, s_n, d = self.buffer.sample(self.batch_size)
+        s, a, r, s_n, t = self.buffer.sample()
 
         with torch.no_grad():
             # Sample next action and log prob from policy
@@ -129,7 +87,7 @@ class SAC:
             q_target_min = torch.min(q1_target_val, q2_target_val)
 
             # Compute entropy-augmented Q target
-            target = r + self.gamma * (1 - d) * (q_target_min - self.alpha * logp_a_n)
+            target = r + self.gamma * (1 - t) * (q_target_min - self.alpha * logp_a_n)
 
         # Compute current Q estimates
         q1 = self.q1(s, a)
@@ -170,39 +128,73 @@ class SAC:
         # Create the gym environment wrapper
         env = TorchEnvironment(
             num_episodes=num_episodes,
-            policy=self.policy if self.use_policy else None,  # Respect use_policy
+            policy=self.policy,
             benchmark=benchmark,
             device=self.device
         )
 
         steps = 0
-        s, _ = env.reset()
+        s, _ = env.reset(seed=self.seed)
 
         while not env.done():
             # Initial exploration with random actions
-            if steps < self.start_steps:
+            if steps < self.begin_learning:
                 a = 2 * torch.rand((ACTION_DIM,), device=self.device) - 1
             else:
-                with torch.no_grad():
-                    a, _ = self.policy.sample(s)
+                a = self.policy_action(s)
 
             # Interact with environment
             s_n, r, terminated, truncated, _ = env.step(a)
-            d = terminated or truncated
 
             # Store transition in replay buffer
-            self.buffer.append(s, a, r, s_n, d.to(torch.float32))
+            self.buffer.append(s, a, r, s_n, terminated.to(torch.float32))
             s = s_n
 
             # Reset if episode ends
-            if d:
+            if terminated or truncated:
                 s, _ = env.reset()
 
             steps += 1
 
             # Update networks periodically
-            if steps > self.update_after and steps % self.update_every == 0:
-                for _ in range(self.update_every):
+            if steps > self.begin_learning:
+                self.update()
+
+    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
+
+        env = BatchEnvironment(
+            num_steps=num_steps,
+            num_envs=num_envs,
+            policy=self.policy,
+            benchmark=benchmark,
+            device=self.device
+        )
+
+        s, _ = env.reset(seed=self.seed)
+        
+        while not env.done():
+            if env.get_current_step() < self.begin_learning:
+                a = 2 * torch.rand((num_envs, ACTION_DIM), device=self.device) - 1
+            else:
+                a = self.policy_action(s)
+
+            s_n, r, terminated, truncated, info = env.step(a)
+            d = torch.logical_or(terminated, truncated)
+            
+            for i in range(num_envs):
+                if d[i]:
+                    s_n_actual = torch.tensor(info["final_obs"][i], dtype=torch.float32, device=self.device)
+                else:
+                    s_n_actual = s_n[i]
+
+                self.buffer.append(s[i], a[i], r[i], s_n_actual, terminated[i].to(torch.float32))
+            
+            s = s_n
+
+            if env.get_current_step() > self.begin_learning:
+
+                # update networks
+                for _ in range(num_envs):
                     self.update()
 
     def save_policy(self, path):

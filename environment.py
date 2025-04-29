@@ -6,6 +6,7 @@ import torch
 
 # local imports
 from algorithms.common import copy_params, DEFAULT_DEVICE
+from algorithms.stochastic_policy_net import StochasticPolicyNetwork
 
 class Environment:
     def __init__(self, num_episodes, render_mode = "rgb_array"):
@@ -56,7 +57,7 @@ class Environment:
     
 
 class TorchEnvironment(Environment):
-    def __init__(self, num_episodes, render_mode="rgb_array", policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE, use_noisy_policy=False):
+    def __init__(self, num_episodes, render_mode="rgb_array", policy=None, benchmark=False, benchmark_every=10000, device=DEFAULT_DEVICE):
         super().__init__(num_episodes, render_mode)
 
         if policy is None and benchmark:
@@ -66,8 +67,6 @@ class TorchEnvironment(Environment):
         self.benchmark = benchmark
         self.benchmark_every = benchmark_every
         self.device = device
-        self.use_noisy_policy = use_noisy_policy  #new argument
-
         self.current_step = 0
         self.benchmark_results = []
     
@@ -211,7 +210,11 @@ class BatchEnvironment:
             s, _ = env.reset(seed=i)
             
             while True:
-                a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+                if isinstance(policy, StochasticPolicyNetwork):
+                    a = policy.mean_action(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+                else:
+                    a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+
                 s, r, terminated, truncated, _ = env.step(a)
 
                 episode_rewards[i] += r
