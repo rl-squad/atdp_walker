@@ -14,6 +14,7 @@ def main():
             os.environ["OUT"] = base + str(i) + "_" + str(j)
 
             td3_ablation = TD3_Ablation(
+                seed=j,
                 double_clipped_Q=bool(i & 4),
                 delayed_policy_updates=bool(i & 2),
                 target_policy_smoothing=bool(i & 1),

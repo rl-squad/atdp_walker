@@ -196,14 +196,16 @@ class TD3PER:
                 # beta schedule for annealling bias of PER sampling after updates
                 self.buffer.sum_tree.anneal_beta()
     
-    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False):
+    def train_batch(self, num_steps=1e6, num_envs=10, benchmark=False, log_save_policy_weights=False):
 
         env = BatchEnvironment(
             num_steps=num_steps,
             num_envs=num_envs,
             policy=self.policy,
             benchmark=benchmark,
-            device=self.device
+            device=self.device,
+            begin_learning=self.begin_learning,
+            log_save_policy_weights=log_save_policy_weights,
         )
 
         self.buffer.sum_tree.calculate_beta_end(num_steps)

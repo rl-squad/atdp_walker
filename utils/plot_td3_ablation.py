@@ -23,6 +23,8 @@ def plot_td3_ablation():
             experiments[experiment_id] = []
         experiments[experiment_id].append(file)
 
+    plt.rcParams.update({'font.size': 12})
+
     plt.figure(figsize=(12, 8))
     colors = plt.cm.Dark2(np.linspace(0, 1, len(experiments)))
     

@@ -12,6 +12,8 @@ def plot_priority_stats():
         print("No priority files found in ./out directory")
         return
     
+    plt.rcParams.update({'font.size': 12})
+    
     # Create figure with 4 subplots
     _, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(6, 7))
 
