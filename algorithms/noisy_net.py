@@ -15,10 +15,10 @@ class NoisyPolicyNetwork(nn.Module):
         self.fc2 = NoisyLinear(hidden_sizes[0], hidden_sizes[1])
         self.out = NoisyLinear(hidden_sizes[1], ACTION_DIM)
 
-    def forward(self, state):
-        x = F.relu(self.fc1(state))
-        x = F.relu(self.fc2(x))
-        action = torch.tanh(self.out(x))
+    def forward(self, state, noisy=True):
+        x = F.relu(self.fc1(state, noisy=noisy))
+        x = F.relu(self.fc2(x, noisy=noisy))
+        action = torch.tanh(self.out(x, noisy=noisy))
         return action
     
 class NoisyLinear(nn.Module):
@@ -51,22 +51,26 @@ class NoisyLinear(nn.Module):
         nn.init.constant_(self.weight_sigma, self.init_weight_sigma)
         nn.init.constant_(self.bias_sigma, self.init_bias_sigma)
 
-    def forward(self, x):
-        weight_noise = torch.normal(
-            mean = 0,
-            std = self.epsilon_sigma,
-            size = self.weight_sigma.shape,
-            device = self.weight_sigma.device
-        )
+    def forward(self, x, noisy=True):
+        weight = self.weight_mu
+        bias = self.bias_mu
+        
+        if noisy:
+            weight_noise = torch.normal(
+                mean = 0,
+                std = self.epsilon_sigma,
+                size = self.weight_sigma.shape,
+                device = self.weight_sigma.device
+            )
 
-        bias_noise = torch.normal(
-            mean = 0,
-            std = self.epsilon_sigma,
-            size = self.bias_sigma.shape,
-            device = self.bias_sigma.device
-        )
+            bias_noise = torch.normal(
+                mean = 0,
+                std = self.epsilon_sigma,
+                size = self.bias_sigma.shape,
+                device = self.bias_sigma.device
+            )
 
-        weight = self.weight_mu + self.weight_sigma * weight_noise
-        bias = self.bias_mu + self.bias_sigma * bias_noise
+            weight = weight + self.weight_sigma * weight_noise
+            bias = bias + self.bias_sigma * bias_noise
 
         return F.linear(x, weight, bias)
