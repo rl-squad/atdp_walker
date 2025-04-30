@@ -1,13 +1,48 @@
-# Getting Started
+# Deep Reinforcement Learning + [Walker2D](https://gymnasium.farama.org/environments/mujoco/walker2d/)
 
--   Clone this repository
+We train a 2D agent to walk using DRL methods (DDPG, TD3, SAC) with further optimisations (Prioritised Experience Replay, NoisyNetworks).
 
+## Getting Started
+
+- Clone this repository
+```sh
+git clone https://github.com/rl-squad/atdp_walker.git
 ```
+- Install [poetry](https://python-poetry.org)
+
+```sh
 cd ~/Atdp_Walker
+# install dependencies
 poetry install
 ```
 
-# Cloud training workflow
+- How to run our experiments
+
+```sh
+# Comparing how SAC performs when using either:
+# • a Uniform Replay Buffer
+# • a Prioritised Experience Replay Buffer
+poetry run python train_sac_prioritised.py
+
+# Comparing which of the 3 improvements from DDPG to TD3
+# contributed the most to performance gains in this environment
+poetry run python train_td3_ablation.py
+
+# Our final agent trained for 6m steps after observing the results
+poetry run python train_final_agent.py
+
+# Results are stored in ~/out/ after experiments complete
+
+# Plots the results, scraping the ~/out/ directory for
+# files output from the experiments
+poetry run python utils/plot_*
+
+# To manually run training for a single agent,
+# replacing filename with desired output filename
+OUT=filename poetry run python train_td3.py
+```
+
+## Cloud training workflow
 
 ```sh
 # Login to cloud
