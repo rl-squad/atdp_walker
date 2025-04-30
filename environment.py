@@ -7,6 +7,7 @@ import torch
 # local imports
 from algorithms.common import copy_params, DEFAULT_DEVICE
 from algorithms.stochastic_policy_net import StochasticPolicyNetwork
+from algorithms.noisy_net import NoisyPolicyNetwork
 
 class Environment:
     def __init__(self, num_episodes, render_mode = "rgb_array"):
@@ -241,6 +242,8 @@ class BatchEnvironment:
             while True:
                 if isinstance(policy, StochasticPolicyNetwork):
                     a = policy.mean_action(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
+                elif isinstance(policy, NoisyPolicyNetwork):
+                    a = policy(torch.tensor(s, dtype=torch.float32, device=self.device), noisy=False).detach().cpu().numpy()
                 else:
                     a = policy(torch.tensor(s, dtype=torch.float32, device=self.device)).detach().cpu().numpy()
 
