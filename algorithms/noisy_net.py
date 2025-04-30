@@ -70,7 +70,7 @@ class NoisyLinear(nn.Module):
                 device = self.bias_sigma.device
             )
 
-            weight += self.weight_sigma * weight_noise
-            bias += self.bias_sigma * bias_noise
+            weight = weight + self.weight_sigma * weight_noise
+            bias = bias + self.bias_sigma * bias_noise
 
         return F.linear(x, weight, bias)
