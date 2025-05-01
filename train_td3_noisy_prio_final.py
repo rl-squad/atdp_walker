@@ -1,6 +1,6 @@
 from algorithms.td3_noisy_prioritised import NoisyPrioritisedTD3
 import os
-from multiprocessing import Process
+import multiprocessing as mp
 
 base = "td3_noisy_prio_"
 
@@ -18,7 +18,7 @@ def experiment(i, j):
 
 def main():
     seeds = range(10)
-    processes = [Process(target=experiment, args=(2, s)) for s in seeds]
+    processes = [mp.Process(target=experiment, args=(2, s)) for s in seeds]
 
     for p in processes:
         p.start()
@@ -28,4 +28,6 @@ def main():
 
 
 if __name__ == "__main__":
+    mp.set_start_method("spawn")
+
     main()
