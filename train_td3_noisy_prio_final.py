@@ -14,7 +14,7 @@ def experiment(i, j):
         noisy_net=(i != 0),
     )
     
-    td3_noisy_prio.train_batch(num_steps=10000, benchmark=True)
+    td3_noisy_prio.train_batch(num_steps=3000000, benchmark=True)
 
 def main():
     seeds = range(10)
