@@ -111,11 +111,19 @@ class NoisyPrioritisedTD3:
         used for recalculating priorities
         """
         with torch.no_grad():
-            a_target = torch.clamp(
-                self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
-                min=-1,
-                max=1
-            )
+            if isinstance(self.policy_target, NoisyPolicyNetwork):
+                a_target = torch.clamp(    
+                    self.policy_target(s_n, noisy=False) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
+                    min=-1,
+                    max=1
+                )
+            else:
+                a_target = torch.clamp(    
+                    self.policy_target(s_n) + self.smoothing_noise.sample((self.batch_size, ACTION_DIM)),
+                    min=-1,
+                    max=1
+                )
+            
             target = r + self.gamma * (1 - t) * torch.min(
                 self.q1_target(s_n, a_target),
                 self.q2_target(s_n, a_target)
