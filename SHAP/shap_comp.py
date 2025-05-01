@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import os
-import argparse
+import random
 import numpy as np
 import torch
 import gymnasium as gym
@@ -8,95 +8,115 @@ import shap
 import pickle
 import sys
 
-# Add path to allow for importing local module from a different subfolder
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
+policy_path       = "SHAP/ddpg_batch.pth"
+num_bg_samples    = 3000                    # How many on-policy states for background
+num_explain_samples = 300                   # How many on-policy states to explain
+kmeans_clusters   = 800                     # Number of clusters for k-means summarization
+nsamples          = 1500                    # Integration samples for SHAP (kernel/permutation)
+algorithm         = "kernel"                # "kernel", "permutation", "exact", "gradient", etc.
+seed              = 42                      
+output_file       = "SHAP/shap_output.pkl"
+# -----------------------------------------------------------------------------
+
+# Add path to allow importing local modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from algorithms.common import PolicyNetwork, DEFAULT_DEVICE, ACTION_DIM, STATE_DIM
 
-def load_policy(policy_path):
+
+def load_policy(path):
     policy = PolicyNetwork().to(DEFAULT_DEVICE)
-    policy.load_state_dict(torch.load(policy_path, map_location=DEFAULT_DEVICE))
+    policy.load_state_dict(torch.load(path, map_location=DEFAULT_DEVICE))
     policy.eval()
-    print(f"Loaded policy from {policy_path}. Expected input dim: {policy.fc1.in_features}")
+    print(f"Loaded policy from {path}. Input dim: {policy.fc1.in_features}")
     return policy
 
-def init_env():
+
+def init_env(seed=None):
     env = gym.make("Walker2d-v5", render_mode="rgb_array")
+    if seed is not None:
+        env.reset(seed=seed)
     return env
 
-def collect_states_on_policy(env, policy, num_samples=500):
+
+def collect_states_on_policy(env, policy, num_samples):
     states = []
-    observation, _ = env.reset()
+    obs, _ = env.reset()
     for _ in range(num_samples):
-        states.append(observation)
-        obs_tensor = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).to(DEFAULT_DEVICE)
+        states.append(obs)
+        tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(DEFAULT_DEVICE)
         with torch.no_grad():
-            action = policy(obs_tensor).cpu().numpy()[0]
-        observation, _, terminated, truncated, _ = env.step(action)
-        if terminated or truncated:
-            observation, _ = env.reset()
+            act = policy(tensor).cpu().numpy()[0]
+        obs, _, term, trunc, _ = env.step(act)
+        if term or trunc:
+            obs, _ = env.reset()
     return np.array(states)
 
+
 def wrapped_policy(x, policy):
-    # Ensure that x is converted to a torch tensor on the proper device
-    x_tensor = torch.tensor(x, dtype=torch.float32).to(DEFAULT_DEVICE)
+    xt = torch.tensor(x, dtype=torch.float32).to(DEFAULT_DEVICE)
     with torch.no_grad():
-        out = policy(x_tensor)
-    return out.detach().cpu().numpy()
+        out = policy(xt)
+    return out.cpu().numpy()
 
-def run_shap_computation(policy_path, num_bg_samples, num_explain_samples, output_file, kmeans_clusters, nsamples):
+
+def run_shap_computation():
+    # reproducibility
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+
+    # load
     policy = load_policy(policy_path)
-    env = init_env()
+    env    = init_env(seed)
 
-    background_data = collect_states_on_policy(env, policy, num_samples=num_bg_samples)
+    # collect data
+    bg_data = collect_states_on_policy(env, policy, num_bg_samples)
+    expl_data = collect_states_on_policy(env, policy, num_explain_samples)
 
-    # Use a larger number of clusters if specified.
-    background_summary = shap.kmeans(background_data, kmeans_clusters)
-    background_summary_array = background_summary.data
-
-    wrapped_fn = lambda x: wrapped_policy(x, policy)
-
-    # Pass the nsamples parameter when computing SHAP values.
-    explainer = shap.Explainer(wrapped_fn, background_summary_array)
-    
-    states_to_explain = collect_states_on_policy(env, policy, num_samples=num_explain_samples)
-
-    # Pass nsamples here if supported by the explainer:
-    shap_values = explainer(states_to_explain)
-
-    output_data = {
-        "shap_values": shap_values,
-        "states_to_explain": states_to_explain,
-        "feature_names": [
+    # feature names
+    if STATE_DIM == 17:
+        feature_names = [
             "torso_height", "torso_angle", "right_thigh_angle", "right_leg_angle", "right_foot_angle",
             "left_thigh_angle", "left_leg_angle", "left_foot_angle", "torso_x_velocity", 
             "torso_z_velocity", "torso_angular_velocity", "right_thigh_angular_velocity", "right_leg_angular_velocity",
             "right_foot_angular_velocity", "left_thigh_angular_velocity", "left_leg_angular_velocity", "left_foot_angular_velocity"
-        ] if STATE_DIM == 17 else [f"feature_{i}" for i in range(STATE_DIM)]
-    }
-    with open(output_file, "wb") as f:
-        pickle.dump(output_data, f)
-    print(f"SHAP computation complete and saved to {output_file}")
+        ]
+    else:
+        feature_names = [f"feature_{i}" for i in range(STATE_DIM)]
 
+    # k-means background summary
+    print(f"Summarizing {len(bg_data)} states into {kmeans_clusters} clusters...")
+    bg_summary = shap.kmeans(bg_data, kmeans_clusters).data
 
-def main():
-    parser = argparse.ArgumentParser(description="Compute SHAP values for a policy in Walker2d")
-    parser.add_argument("--policy_path", type=str, default="SHAP/ddpg_batch.pth",
-                        help="Path to the policy checkpoint file")
-    parser.add_argument("--num_bg", type=int, default=500,
-                        help="Number of background samples")
-    parser.add_argument("--num_explain", type=int, default=100,
-                        help="Number of on-policy samples to explain")
-    parser.add_argument("--kmeans_clusters", type=int, default=100,
-                        help="Number of clusters for background summarization using kmeans")
-    # Optionally add an argument for nsamples if needed:
-    parser.add_argument("--nsamples", type=int, default=500,
-                        help="Number of samples used in SHAP integration")
-    parser.add_argument("--output_file", type=str, default="SHAP/shap_output.pkl",
-                        help="File where computed SHAP results will be stored")
-    args = parser.parse_args()
-    
-    run_shap_computation(args.policy_path, args.num_bg, args.num_explain, args.output_file, args.kmeans_clusters, args.nsamples)
+    # wrapped fn
+    fn = lambda x: wrapped_policy(x, policy)
+
+    # compute
+    if algorithm.lower() == "kernel":
+        print(f"Using KernelExplainer (nsamples={nsamples})")
+        ke = shap.KernelExplainer(fn, bg_summary)
+        raw = ke.shap_values(expl_data, nsamples=nsamples)
+        base = ke.expected_value
+        expl = shap.Explanation(values=raw,
+                                base_values=base,
+                                data=expl_data,
+                                feature_names=feature_names)
+    else:
+        print(f"Using SHAP Explainer algorithm='{algorithm}' (nsamples={nsamples})")
+        expl = shap.Explainer(fn, bg_summary, algorithm=algorithm)(expl_data, nsamples=nsamples)
+
+    # save
+    with open(output_file, 'wb') as f:
+        pickle.dump({
+            'shap_values': expl,
+            'states_to_explain': expl_data,
+            'feature_names': feature_names
+        }, f)
+    print(f"Saved SHAP results to {output_file}")
 
 
 if __name__ == "__main__":
-    main()
+    run_shap_computation()
