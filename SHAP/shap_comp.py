@@ -11,14 +11,14 @@ import sys
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-policy_path       = "SHAP/ddpg_batch.pth"
-num_bg_samples    = 3000                    # How many on-policy states for background
-num_explain_samples = 300                   # How many on-policy states to explain
-kmeans_clusters   = 800                     # Number of clusters for k-means summarization
-nsamples          = 1500                    # Integration samples for SHAP (kernel/permutation)
-algorithm         = "kernel"                # "kernel", "permutation", "exact", "gradient", etc.
+policy_path       = "SHAP/td3per_final_0_100k.pth"
+num_bg_samples    = 5000                    # How many on-policy states for background
+num_explain_samples = 500                   # How many on-policy states to explain
+kmeans_clusters   = 1000                    # Number of clusters for k-means summarization
+nsamples          = 2000                    # Integration samples for SHAP (kernel/permutation)
+algorithm         = "kernel"                # "kernel", "permutation", "exact", "gradient", (I think there are more, but these are standard)
 seed              = 42                      
-output_file       = "SHAP/shap_output.pkl"
+output_file       = "SHAP/shap_output_100k.pkl"
 # -----------------------------------------------------------------------------
 
 # Add path to allow importing local modules
@@ -100,10 +100,7 @@ def run_shap_computation():
         ke = shap.KernelExplainer(fn, bg_summary)
         raw = ke.shap_values(expl_data, nsamples=nsamples)
         base = ke.expected_value
-        expl = shap.Explanation(values=raw,
-                                base_values=base,
-                                data=expl_data,
-                                feature_names=feature_names)
+        expl = shap.Explanation(values=raw, base_values=base, data=expl_data, feature_names=feature_names)
     else:
         print(f"Using SHAP Explainer algorithm='{algorithm}' (nsamples={nsamples})")
         expl = shap.Explainer(fn, bg_summary, algorithm=algorithm)(expl_data, nsamples=nsamples)
