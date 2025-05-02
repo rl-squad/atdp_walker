@@ -73,7 +73,7 @@ def plot_td3_ablation():
     plt.title("TD3 Ablation Study (Mean ± 95% CI across 10 agents)", fontweight="bold")
     plt.xlabel("Training Steps")
     plt.ylabel("Mean Episode Reward")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.legend(loc='upper left')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
